@@ -1,12 +1,29 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, ChevronRight, HelpCircle, X } from 'lucide-react';
+import { ChevronLeft, HelpCircle, X, Pin, Scissors, MousePointer2, Search, Check } from 'lucide-react';
 import Link from 'next/link';
 import { useStore } from '@/lib/store';
 import { useT } from '@/hooks/useTranslation';
+import DraggableSVG, { type Point } from '@/components/lab/DraggableSVG';
 
-type Layer = 0 | 1 | 2 | 3;
+type Stage = 'pin' | 'incision' | 'retract' | 'muscle' | 'inspect';
+type Tool = 'pins' | 'scalpel' | 'forceps' | 'probe';
+
+const STAGES: { id: Stage; label: string; tool: Tool; goal: string }[] = [
+  { id: 'pin', label: 'Secure specimen', tool: 'pins', goal: 'Select Pins. Place one pin at each of the four numbered limb targets on the tray.' },
+  { id: 'incision', label: 'Skin incision', tool: 'scalpel', goal: 'Select Scalpel. Press at START and drag down the dashed midline to END. Stay inside the guide; resume at the highlighted tip if interrupted.' },
+  { id: 'retract', label: 'Retract skin', tool: 'forceps', goal: 'Select Forceps. Drag each skin flap handle outward into its matching side target, then release.' },
+  { id: 'muscle', label: 'Open body wall', tool: 'scalpel', goal: 'Skin is retracted; the muscle wall still covers the cavity. Select Scalpel and trace the shorter midline guide to open this schematic wall.' },
+  { id: 'inspect', label: 'Inspect organs', tool: 'probe', goal: 'Cavity revealed. Select Probe, then inspect each of the seven organs in the diagram or list. The identification quiz is now available.' },
+];
+const TOOLS = [
+  { id: 'pins' as const, label: 'Pins', Icon: Pin },
+  { id: 'scalpel' as const, label: 'Scalpel', Icon: Scissors },
+  { id: 'forceps' as const, label: 'Forceps', Icon: MousePointer2 },
+  { id: 'probe' as const, label: 'Probe', Icon: Search },
+];
+const PIN_TARGETS = [{ x: 208, y: 244 }, { x: 392, y: 244 }, { x: 201, y: 389 }, { x: 399, y: 389 }];
 
 interface Organ {
   id: string;
@@ -72,7 +89,16 @@ export default function FrogAnatomyLab() {
   const { completeExperiment } = useStore();
   const locale = useStore((s) => s.locale);
 
-  const [layer, setLayer]           = useState<Layer>(0);
+  const [stage, setStage] = useState<Stage>('pin');
+  const [tool, setTool] = useState<Tool>('pins');
+  const [pins, setPins] = useState<number[]>([]);
+  const [flaps, setFlaps] = useState<string[]>([]);
+  const [traceY, setTraceY] = useState(220);
+  const [feedback, setFeedback] = useState('Place the four pins to stabilize the specimen.');
+  const [heldAt, setHeldAt] = useState<Point | null>(null);
+  const [resetKey, setResetKey] = useState(0);
+  const trace = useRef<{ pointerId: number; y: number } | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
   const [hovered, setHovered]       = useState<string | null>(null);
   const [selected, setSelected]     = useState<string | null>(null);
   const [quizMode, setQuizMode]     = useState(false);
@@ -85,19 +111,95 @@ export default function FrogAnatomyLab() {
 
   useEffect(() => () => {
     if (quizTimer.current !== null) clearTimeout(quizTimer.current);
+    trace.current = null;
   }, []);
 
   const selectedOrgan = ORGANS.find((o) => o.id === selected);
 
-  const LAYER_LABELS = [
-    t('frog.layer.external'),
-    t('frog.layer.skin'),
-    t('frog.layer.muscles'),
-    t('frog.layer.organs'),
-  ];
+  const stageIndex = STAGES.findIndex((item) => item.id === stage);
+  const currentStage = STAGES[stageIndex];
+  const exposed = stage === 'inspect';
+  const tracing = stage === 'incision' || stage === 'muscle';
+  const traceStart = stage === 'muscle' ? 265 : 220;
+  const traceEnd = stage === 'muscle' ? 335 : 380;
 
-  const handleLayerNext = () => {
-    if (layer < 3) setLayer((l) => (l + 1) as Layer);
+  const cancelTrace = () => {
+    const active = trace.current;
+    trace.current = null;
+    if (active && svgRef.current?.hasPointerCapture(active.pointerId)) {
+      svgRef.current.releasePointerCapture(active.pointerId);
+    }
+  };
+
+  const chooseTool = (next: Tool) => {
+    cancelTrace();
+    setHeldAt(null);
+    setTool(next);
+    setFeedback(next === currentStage.tool
+      ? `${TOOLS.find((item) => item.id === next)?.label} selected. ${currentStage.goal}`
+      : `This step needs ${currentStage.tool}. Your selected tool cannot advance it.`);
+  };
+
+  const placePin = (index: number) => {
+    if (stage !== 'pin' || tool !== 'pins') {
+      setFeedback(stage === 'pin' ? 'Select Pins before securing a target.' : 'The specimen is already secured. Follow the current goal.');
+      return;
+    }
+    if (pins.includes(index)) { setFeedback('This target already has a pin. Use an empty numbered target.'); return; }
+    const next = [...pins, index];
+    setPins(next);
+    if (next.length === PIN_TARGETS.length) {
+      setStage('incision');
+      setFeedback('All four pins are placed. Select Scalpel to trace the skin incision.');
+    } else setFeedback(`Pin ${index + 1} secured. ${PIN_TARGETS.length - next.length} targets remain.`);
+  };
+
+  const retractFlap = (side: string, point: Point) => {
+    if (stage !== 'retract' || tool !== 'forceps') {
+      setFeedback('Select Forceps after completing the skin incision.');
+      return;
+    }
+    const targetX = side === 'left' ? 222 : 378;
+    if (Math.abs(point.x - targetX) > 18 || Math.abs(point.y - 300) > 25) {
+      setFeedback(`Release the ${side} flap inside its outlined side target. It has returned to the incision.`);
+      return;
+    }
+    if (flaps.includes(side)) return;
+    const next = [...flaps, side];
+    setFlaps(next);
+    if (next.length === 2) {
+      setStage('muscle');
+      setTraceY(265);
+      setFeedback('Both skin flaps are held aside. The muscle layer is visible, not the organs. Select Scalpel for the short second opening.');
+    } else setFeedback(`${side === 'left' ? 'Left' : 'Right'} skin flap secured aside. Retract the other flap.`);
+  };
+
+  // Both pointer and keyboard tracing advance the same geometric midline tip.
+  const advanceTrace = (point: Point, previousY: number) => {
+    if (!tracing || tool !== 'scalpel') return;
+    if (Math.abs(point.x - 300) > 12 || point.y < previousY - 14 || point.y > traceEnd + 16) {
+      cancelTrace();
+      setFeedback('Keep the scalpel inside the guide and move downward. Resume at the highlighted tip; completed tracing is saved.');
+      return;
+    }
+    const nextY = point.y >= traceEnd - 3 ? traceEnd : Math.max(previousY, point.y);
+    setTraceY(nextY);
+    if (trace.current) trace.current.y = nextY;
+    if (nextY >= traceEnd) {
+      cancelTrace();
+      if (stage === 'incision') {
+        setStage('retract');
+        setFeedback('Skin incision complete. Select Forceps and pull each flap to its side target.');
+      } else {
+        setStage('inspect');
+        setFeedback('Body wall opened. Select Probe to inspect the seven organs.');
+      }
+    }
+  };
+
+  const svgPoint = (event: PointerEvent<SVGSVGElement>): Point | null => {
+    const matrix = event.currentTarget.getScreenCTM();
+    return matrix ? new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse()) : null;
   };
 
   const stopQuiz = () => {
@@ -110,12 +212,13 @@ export default function FrogAnatomyLab() {
   };
 
   const startQuiz = () => {
+    if (!exposed) return;
     stopQuiz();
     const randomOrgan = QUIZ_ORGANS[Math.floor(Math.random() * QUIZ_ORGANS.length)];
     setQuizOrgan(randomOrgan);
     setQuizScore({ correct: 0, total: 0 });
     setQuizMode(true);
-    setLayer(3);
+    chooseTool('probe');
   };
 
   const handleQuizAnswer = (organId: string) => {
@@ -135,15 +238,23 @@ export default function FrogAnatomyLab() {
   };
 
   const handleOrganSelect = (organId: string) => {
+    if (!exposed || tool !== 'probe') {
+      setFeedback(exposed ? 'Select Probe to inspect or identify an organ.' : 'Finish the procedure before inspecting organs.');
+      return;
+    }
     if (quizMode) {
       handleQuizAnswer(organId);
       return;
     }
     setSelected(selected === organId ? null : organId);
+    const organ = ORGANS.find((item) => item.id === organId);
+    setFeedback(selected === organId
+      ? 'Organ information closed. Select another organ with the probe.'
+      : `Inspecting ${organ?.nameEn}. Read its function in the information card below the tray.`);
     if (explored.includes(organId)) return;
     const nextExplored = [...explored, organId];
     setExplored(nextExplored);
-    if (nextExplored.length === ORGANS.length && !isDone) {
+    if (exposed && nextExplored.length === ORGANS.length && !isDone) {
       completeExperiment('frog-anatomy', 100);
       setIsDone(true);
     }
@@ -151,7 +262,15 @@ export default function FrogAnatomyLab() {
 
   const resetLab = () => {
     stopQuiz();
-    setLayer(0);
+    cancelTrace();
+    setStage('pin');
+    setTool('pins');
+    setPins([]);
+    setFlaps([]);
+    setTraceY(220);
+    setHeldAt(null);
+    setResetKey((key) => key + 1);
+    setFeedback('Lab reset. Place the four pins to stabilize the specimen.');
     setQuizOrgan(QUIZ_ORGANS[0]);
     setQuizScore({ correct: 0, total: 0 });
     setExplored([]);
@@ -162,74 +281,88 @@ export default function FrogAnatomyLab() {
     <div className="flex flex-col lg:flex-row lg:h-[calc(100dvh-64px)] lg:overflow-hidden">
 
       {/* ===================== FROG SVG ===================== */}
-      <div className="relative min-w-0 shrink-0 lg:flex-1 lg:min-h-0 bg-gradient-to-b from-emerald-950 to-green-900 overflow-hidden">
+      <div className="relative flex flex-col min-w-0 shrink-0 lg:flex-1 lg:min-h-0 bg-gradient-to-b from-slate-900 to-slate-800 overflow-hidden">
 
         <Link href="/lab" className="absolute top-3 left-3 z-10 flex items-center gap-1 text-xs text-emerald-400 hover:text-white bg-emerald-900/80 rounded-full px-2.5 py-1.5 backdrop-blur">
           <ChevronLeft className="h-3 w-3" /> Back
         </Link>
 
-        {/* Layer indicator */}
-        <div className="absolute top-14 inset-x-3 z-10 flex flex-wrap justify-center items-center gap-2">
-          {LAYER_LABELS.map((label, i) => (
-            <div key={i} className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all ${layer === i ? 'bg-emerald-500 text-white' : layer > i ? 'bg-emerald-900/60 text-emerald-500' : 'bg-emerald-900/40 text-emerald-700'}`}>
-              {layer > i && <span>✓</span>}
-              <span>{label}</span>
-            </div>
-          ))}
+        <div className="absolute top-14 inset-x-3 z-10 text-center pointer-events-none">
+          <p className="text-xs uppercase tracking-widest text-slate-400">Virtual dissection tray</p>
+          <p className="mt-1 text-sm text-teal-200">{stageIndex + 1} / 5: {currentStage.label}</p>
+          <p className="mt-1 text-xs text-slate-300">Holding: {TOOLS.find((item) => item.id === tool)?.label}</p>
         </div>
 
-        {/* Frog SVG */}
-        <svg viewBox="160 120 280 340" role="group" aria-label={t('frog.title')} className="block w-full h-[460px] sm:h-[520px] lg:h-full pt-28 pb-4">
-          {/* === LAYER 0: External view === */}
-          <g opacity={layer >= 0 ? 1 : 0}>
-            {/* Frog body silhouette */}
-            <ellipse cx="300" cy="300" rx="95" ry="120" fill={layer < 1 ? '#4ade80' : 'none'} />
-            {/* Head */}
-            <ellipse cx="300" cy="195" rx="65" ry="55" fill={layer < 1 ? '#4ade80' : 'none'} />
-            {/* Eyes */}
-            <circle cx="268" cy="170" r="16" fill={layer < 1 ? '#86efac' : 'none'} />
-            <circle cx="332" cy="170" r="16" fill={layer < 1 ? '#86efac' : 'none'} />
-            <circle cx="270" cy="170" r="9" fill="#1f2937" />
-            <circle cx="334" cy="170" r="9" fill="#1f2937" />
-            <circle cx="268" cy="168" r="3" fill="white" />
-            <circle cx="332" cy="168" r="3" fill="white" />
-            {/* Skin spots */}
-            {layer < 1 && [
-              [288, 230, 8], [315, 245, 6], [275, 270, 7], [325, 280, 5],
-              [290, 315, 9], [320, 320, 6], [278, 350, 7],
-            ].map(([x, y, r], i) => (
-              <ellipse key={i} cx={x} cy={y} rx={r} ry={r * 0.7} fill="#22c55e" />
-            ))}
-            {/* Legs */}
-            {layer < 1 && (
-              <>
-                <path d="M 205 310 Q 185 330 180 350 Q 175 370 190 375 Q 200 377 205 360 Q 208 345 215 335 Z" fill="#4ade80" />
-                <path d="M 395 310 Q 415 330 420 350 Q 425 370 410 375 Q 400 377 395 360 Q 392 345 385 335 Z" fill="#4ade80" />
-                <path d="M 210 380 Q 180 395 168 410 Q 162 420 175 422 Q 185 423 195 410 Q 205 398 215 392 Z" fill="#4ade80" />
-                <path d="M 390 380 Q 420 395 432 410 Q 438 420 425 422 Q 415 423 405 410 Q 395 398 385 392 Z" fill="#4ade80" />
-              </>
-            )}
+        <svg ref={svgRef} viewBox="145 120 310 340" role="group" aria-label={t('frog.title')}
+          className="block w-full h-[540px] sm:h-[620px] lg:flex-1 lg:min-h-0 lg:h-auto pt-32 pb-4"
+          style={{ touchAction: tracing ? 'none' : 'pan-y', cursor: tool === 'forceps' ? 'grab' : 'crosshair' }}
+          onPointerDown={(event) => {
+            if (event.button !== 0 || trace.current || (event.target as Element).closest('[data-flap]')) return;
+            const point = svgPoint(event);
+            if (!point) return;
+            setHeldAt(point);
+            if (!tracing) {
+              if (event.target === event.currentTarget || !(event.target as Element).closest('[role="button"]'))
+                setFeedback(`No action here. ${currentStage.goal}`);
+              return;
+            }
+            if (tool !== 'scalpel') { setFeedback('Select Scalpel to trace this guide.'); return; }
+            if (Math.abs(point.x - 300) > 12 || Math.abs(point.y - traceY) > 14) {
+              setFeedback('Begin at the highlighted incision tip, not elsewhere on the specimen.');
+              return;
+            }
+            trace.current = { pointerId: event.pointerId, y: traceY };
+            event.currentTarget.setPointerCapture(event.pointerId);
+            event.preventDefault();
+            setFeedback('Tracing: keep the blade on the dashed midline and move toward END.');
+          }}
+          onPointerMove={(event) => {
+            const point = svgPoint(event);
+            if (!point) return;
+            setHeldAt(point);
+            if (trace.current?.pointerId === event.pointerId) advanceTrace(point, trace.current.y);
+          }}
+          onPointerUp={(event) => {
+            if (event.pointerType === 'touch') setHeldAt(null);
+            if (trace.current?.pointerId !== event.pointerId) return;
+            cancelTrace();
+            setFeedback('Trace paused. Resume at the highlighted tip to finish the incision.');
+          }}
+          onPointerCancel={() => { if (trace.current) setFeedback('Trace cancelled. Resume at the highlighted tip.'); cancelTrace(); setHeldAt(null); }}
+          onLostPointerCapture={() => { trace.current = null; }}
+          onPointerLeave={() => setHeldAt(null)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && trace.current) {
+              cancelTrace();
+              setFeedback('Trace paused. Resume at the highlighted tip.');
+            }
+          }}
+        >
+          <rect x="150" y="125" width="300" height="330" rx="18" fill="#334155" stroke="#64748b" strokeWidth="3" />
+          <rect x="160" y="135" width="280" height="310" rx="12" fill="#253b40" stroke="#475569" />
+          <text x="174" y="438" fontSize="7" fill="#94a3b8">VENTRAL VIEW / SCHEMATIC</text>
+          <g fill="#819680" stroke="#a3b39c" strokeWidth="1">
+            <path d="M 245 235 Q 219 221 201 239 L 197 254 Q 222 268 250 261 Z" />
+            <path d="M 355 235 Q 381 221 399 239 L 403 254 Q 378 268 350 261 Z" />
+            <path d="M 245 356 Q 210 351 190 386 L 182 408 Q 200 422 215 395 L 265 381 Z" />
+            <path d="M 355 356 Q 390 351 410 386 L 418 408 Q 400 422 385 395 L 335 381 Z" />
+            <ellipse cx="300" cy="300" rx="85" ry="120" />
+            <ellipse cx="300" cy="180" rx="57" ry="38" />
           </g>
+          <path d="M 262 184 Q 300 195 338 184" fill="none" stroke="#536957" />
+          <g fill="#33433c"><ellipse cx="267" cy="163" rx="7" ry="5" /><ellipse cx="333" cy="163" rx="7" ry="5" /></g>
 
-          {/* === LAYER 1: Skin removed - muscles === */}
-          {layer >= 1 && (
-            <g>
-              {/* Body outline */}
-              <ellipse cx="300" cy="300" rx="95" ry="120" fill={layer === 1 ? '#f87171' : 'rgba(248,113,113,0.15)'} stroke="#dc2626" strokeWidth={layer === 1 ? 2 : 1} />
-              <ellipse cx="300" cy="195" rx="65" ry="55" fill={layer === 1 ? '#fca5a5' : 'rgba(252,165,165,0.15)'} stroke="#dc2626" strokeWidth={layer === 1 ? 2 : 1} />
-              {/* Muscle fibers */}
-              {layer === 1 && [220, 240, 260, 280, 300, 320, 340, 360, 380].map((y, i) => (
-                <line key={i} x1="215" y1={y} x2="385" y2={y} stroke="#b91c1c" strokeWidth="1.5" opacity="0.4" />
-              ))}
-              {layer === 1 && [235, 255, 275, 295, 315, 335, 355, 375].map((x, i) => (
-                <line key={`v${i}`} x1={x} y1="185" x2={x} y2="415" stroke="#b91c1c" strokeWidth="1" opacity="0.3" />
-              ))}
-              <text x="300" y="310" textAnchor="middle" fontSize="10" fill={layer === 1 ? '#dc2626' : 'transparent'} fontWeight="600">Rectus Abdominis</text>
-            </g>
+          {(stage === 'retract' || stage === 'muscle' || exposed) && (
+            <motion.g initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.35 }}>
+              <ellipse cx="300" cy="295" rx="72" ry="117" fill={exposed ? '#182c32' : '#b3a694'} stroke="#c6bba9" />
+              {!exposed && <g stroke="#867a6b" strokeWidth="1" opacity="0.6">
+                {[225, 240, 255, 270, 285, 300, 315, 330, 345, 360, 375].map((y) => <path key={y} d={`M 245 ${y} Q 275 ${y + 10} 300 ${y} Q 325 ${y + 10} 355 ${y}`} fill="none" />)}
+              </g>}
+              {stage === 'muscle' && <text x="300" y="245" textAnchor="middle" fontSize="8" fill="#302d28">Abdominal muscle wall</text>}
+            </motion.g>
           )}
 
-          {/* === LAYER 2+: Internal organs === */}
-          {layer >= 2 && ORGANS.map((organ) => {
+          {exposed && ORGANS.map((organ) => {
             const isHovered   = !quizMode && hovered === organ.id;
             const isSelected  = !quizMode && selected === organ.id;
             const fill = isSelected || isHovered
@@ -246,7 +379,7 @@ export default function FrogAnatomyLab() {
                 className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
                 onMouseEnter={() => !quizMode && setHovered(organ.id)}
                 onMouseLeave={() => !quizMode && setHovered(null)}
-                onClick={() => handleOrganSelect(organ.id)}
+                onClick={(event) => { event.stopPropagation(); handleOrganSelect(organ.id); }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
@@ -260,13 +393,15 @@ export default function FrogAnatomyLab() {
                   fill={fill}
                   stroke={isSelected ? 'white' : 'rgba(255,255,255,0.3)'}
                   strokeWidth={isSelected ? 2 : 1}
-                  animate={{ scale: isHovered ? 1.05 : 1 }}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1, scale: isHovered ? 1.05 : 1 }}
+                  transition={{ duration: 0.25 }}
                   style={{ transformOrigin: `${organ.labelX}px ${organ.labelY}px` }}
                 />
                 {/* Organ label on hover */}
                 {(isHovered || isSelected) && !quizMode && (
-                  <g>
-                    <rect x={organ.labelX - 40} y={organ.labelY - 12} width="80" height="22" rx="5" fill="rgba(0,0,0,0.75)" />
+                  <g pointerEvents="none">
+                    <rect x={organ.labelX - 44} y={organ.labelY - 12} width="88" height="22" rx="5" fill="rgba(0,0,0,0.85)" />
                     <text x={organ.labelX} y={organ.labelY + 4} textAnchor="middle" fontSize="9.5" fill="white" fontWeight="600">
                       {locale === 'ne' ? organ.nameNe : organ.nameEn}
                     </text>
@@ -276,15 +411,50 @@ export default function FrogAnatomyLab() {
             );
           })}
 
-          {/* Frog outline (always visible) */}
-          <ellipse cx="300" cy="300" rx="95" ry="120" fill="none" stroke={layer < 2 ? 'transparent' : 'rgba(52,211,153,0.3)'} strokeWidth="1.5" />
-          <ellipse cx="300" cy="195" rx="65" ry="55" fill="none" stroke={layer < 2 ? 'transparent' : 'rgba(52,211,153,0.3)'} strokeWidth="1.5" />
+          {(stage === 'retract' || stage === 'muscle' || exposed) && ['left', 'right'].map((side) => {
+            const left = side === 'left';
+            const secured = flaps.includes(side);
+            return <g key={`${resetKey}-${side}-${tool}`} data-flap="true"
+              onPointerDown={() => {
+                if (stage === 'retract' && tool !== 'forceps') setFeedback('Select Forceps before dragging a skin flap.');
+                else if (secured) setFeedback('This flap is already secured aside. Follow the current goal.');
+              }}>
+              {stage === 'retract' && !secured && <rect x={left ? 204 : 360} y="275" width="36" height="50" rx="10" fill="#5eead4" fillOpacity="0.08" stroke="#5eead4" strokeDasharray="3 3" />}
+              <DraggableSVG x={secured ? (left ? 222 : 378) : (left ? 286 : 314)} y={300}
+                label={`${left ? 'Left' : 'Right'} skin flap: arrow keys move, Enter releases, Escape cancels`}
+                disabled={stage !== 'retract' || tool !== 'forceps' || secured}
+                onDrop={(point) => retractFlap(side, point)}>
+                <path d={left ? 'M 0 -83 Q -52 -55 -49 0 Q -49 57 0 83 Z' : 'M 0 -83 Q 52 -55 49 0 Q 49 57 0 83 Z'}
+                  fill="#819680" stroke="#b2c1a9" opacity={secured ? 0.65 : 1} style={{ transition: 'opacity 250ms' }} />
+                <circle r="13" fill={secured ? '#3d716b' : '#e2e8d8'} stroke="#365b55" />
+                <text y="3" textAnchor="middle" fontSize="9" fill="#163b36" pointerEvents="none">{secured ? 'SET' : left ? 'L' : 'R'}</text>
+              </DraggableSVG>
+            </g>;
+          })}
 
-          {/* Eyes always visible */}
-          <circle cx="270" cy="170" r="9" fill="#1f2937" />
-          <circle cx="334" cy="170" r="9" fill="#1f2937" />
-          <circle cx="268" cy="168" r="3" fill="white" />
-          <circle cx="332" cy="168" r="3" fill="white" />
+          {tracing && <g pointerEvents="none">
+            <path d={`M 300 ${traceStart} V ${traceEnd}`} stroke="#f1f5f9" strokeOpacity="0.13" strokeWidth="24" />
+            <path d={`M 300 ${traceStart} V ${traceEnd}`} stroke="#e2e8f0" strokeWidth="2" strokeDasharray="4 4" />
+            <path d={`M 300 ${traceStart} V ${traceY}`} stroke="#5eead4" strokeWidth="3" />
+            <circle cx="300" cy={traceY} r="7" fill="#0f766e" stroke="#99f6e4" strokeWidth="2" />
+            <text x="314" y={traceStart + 3} fontSize="8" fill="#f1f5f9">START</text>
+            <text x="314" y={traceEnd + 3} fontSize="8" fill="#f1f5f9">END</text>
+          </g>}
+          {PIN_TARGETS.map((point, index) => <g key={index} role="button" tabIndex={stage === 'pin' ? 0 : -1}
+            aria-label={`Place pin ${index + 1}`} aria-pressed={pins.includes(index)}
+            onClick={(event) => { event.stopPropagation(); placePin(index); }}
+            onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (!event.repeat) placePin(index); } }}
+            className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-white">
+            <circle cx={point.x} cy={point.y} r="15" fill={pins.includes(index) ? '#326961' : '#243b40'} stroke="#b3cdc6" strokeDasharray={pins.includes(index) ? undefined : '3 3'} />
+            {pins.includes(index) ? <g pointerEvents="none"><path d={`M ${point.x} ${point.y + 8} l 5 -18`} stroke="#e2e8f0" strokeWidth="2" /><circle cx={point.x + 5} cy={point.y - 10} r="5" fill="#99b7b0" /></g>
+              : <text x={point.x} y={point.y + 4} textAnchor="middle" fontSize="11" fill="#e2e8f0" pointerEvents="none">{index + 1}</text>}
+          </g>)}
+          {heldAt && <g transform={`translate(${heldAt.x} ${heldAt.y})`} pointerEvents="none" aria-hidden="true" stroke="#f1f5f9" strokeWidth="2" fill="none">
+            {tool === 'pins' && <><path d="M 0 0 L 9 -24" /><circle cx="9" cy="-24" r="4" fill="#99b7b0" /></>}
+            {tool === 'scalpel' && <><path d="M 0 0 L 10 -15 L 19 -32" strokeWidth="4" /><path d="M 0 0 L 2 -12 L 10 -15 Z" fill="#cbd5e1" /></>}
+            {tool === 'forceps' && <path d="M -4 0 L 7 -29 Q 10 -33 12 -28 L 4 0" />}
+            {tool === 'probe' && <><path d="M 0 0 L 12 -27" /><circle r="2" fill="#99f6e4" /></>}
+          </g>}
         </svg>
 
         {/* Organ info card */}
@@ -295,7 +465,7 @@ export default function FrogAnatomyLab() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 10 }}
               role="status"
-              className="relative mx-auto mb-4 lg:absolute lg:bottom-4 lg:left-1/2 lg:-translate-x-1/2 lg:mb-0 w-72 max-w-[calc(100%-2rem)] bg-gray-900/95 backdrop-blur-sm rounded-2xl p-4 border border-emerald-800/50"
+              className="relative shrink-0 mx-auto mb-4 w-80 max-w-[calc(100%-2rem)] bg-gray-900/95 backdrop-blur-sm rounded-2xl p-4 border border-emerald-800/50"
             >
               <div className="flex items-start justify-between mb-2">
                 <div>
@@ -321,9 +491,8 @@ export default function FrogAnatomyLab() {
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.5, opacity: 0 }}
               role="status"
-              className={`pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center rounded-2xl p-5 shadow-2xl ${quizResult === 'correct' ? 'bg-green-500' : 'bg-red-500'}`}
+              className={`pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center rounded-2xl p-5 shadow-2xl ${quizResult === 'correct' ? 'bg-teal-800' : 'bg-amber-900'}`}
             >
-              <div className="text-4xl mb-1">{quizResult === 'correct' ? '✓' : '✗'}</div>
               <div className="text-white font-bold text-xl">
                 {quizResult === 'correct' ? t('frog.quiz.correct') : t('frog.quiz.wrong')}
               </div>
@@ -341,7 +510,7 @@ export default function FrogAnatomyLab() {
             {locale === 'ne' ? 'अध्ययन गरिएका अङ्गहरू' : 'Organs explored'}: {explored.length}/{ORGANS.length}
           </p>
           <p className="text-gray-400 text-xs mt-1">
-            {locale === 'ne' ? 'पूरा गर्न अन्वेषण मोडमा सबै सात अङ्गहरू चयन गरी अध्ययन गर्नुहोस्।' : 'To complete, select and study all seven organs in exploration mode.'}
+            Finish the procedure, then use the probe to study all seven organs in exploration mode to complete this lab.
           </p>
           <button onClick={resetLab} className="mt-3 rounded-xl bg-gray-800 px-3 py-2 text-xs hover:bg-gray-700">
             {locale === 'ne' ? 'फेरि सुरु गर्नुहोस्' : 'Reset lab'}
@@ -349,41 +518,50 @@ export default function FrogAnatomyLab() {
         </div>
 
         <div className="p-4 space-y-4 flex-1">
-          {/* Layer navigation */}
           <div>
-            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Dissection Layers</h3>
-            <div className="space-y-2">
-              {LAYER_LABELS.map((label, i) => (
-                <div key={i}
-                  className={`flex items-center gap-3 p-2.5 rounded-xl transition-colors ${layer === i ? 'bg-emerald-800 border border-emerald-600' : layer > i ? 'bg-gray-800/50' : 'bg-gray-800/30'}`}>
-                  <div className={`h-5 w-5 rounded-full flex items-center justify-center text-xs font-bold ${layer > i ? 'bg-emerald-500 text-white' : layer === i ? 'bg-emerald-600 text-white' : 'bg-gray-700 text-gray-500'}`}>
-                    {layer > i ? '✓' : i + 1}
-                  </div>
-                  <span className={`text-sm ${layer >= i ? 'text-white' : 'text-gray-500'}`}>{label}</span>
-                </div>
-              ))}
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Instruments</h3>
+            <div className="grid grid-cols-2 gap-2">
+              {TOOLS.map(({ id, label, Icon }) => <button key={id} onClick={() => chooseTool(id)} aria-pressed={tool === id}
+                className={`flex items-center gap-2 rounded-xl border px-3 py-3 text-sm transition-colors ${tool === id ? 'border-teal-400 bg-teal-900/50 text-teal-100' : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-500'}`}>
+                <Icon className="h-4 w-4" />{label}
+              </button>)}
             </div>
-
-            {/* Navigation buttons */}
-            <div className="flex gap-2 mt-4">
-              <button
-                onClick={() => { setLayer((l) => Math.max(0, l - 1) as Layer); setSelected(null); }}
-                disabled={layer === 0 || quizMode}
-                className="flex-1 flex items-center justify-center gap-1 py-2 rounded-xl bg-gray-800 text-gray-400 hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed text-sm transition-colors">
-                <ChevronLeft className="h-4 w-4" /> Prev
-              </button>
-              <button
-                onClick={handleLayerNext}
-                disabled={layer === 3 || quizMode}
-                className="flex-1 flex items-center justify-center gap-1 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-30 disabled:cursor-not-allowed text-sm transition-colors">
-                {layer < 2 ? t('frog.next.layer') : layer === 2 ? t('frog.layer.organs') : 'Done'}
-                <ChevronRight className="h-4 w-4" />
-              </button>
+          </div>
+          <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-3">
+            <h3 className="text-sm font-semibold text-teal-200">Current goal: {currentStage.label}</h3>
+            <p className="mt-2 text-xs leading-relaxed text-slate-200">{currentStage.goal}</p>
+            <p role="status" aria-live="polite" className="mt-3 border-t border-slate-700 pt-3 text-xs leading-relaxed text-teal-200">{feedback}</p>
+            <div className="mt-3 text-xs text-slate-400">
+              {stage === 'pin' && `${pins.length}/4 pins placed`}
+              {tracing && `Guide traced: ${Math.round((traceY - traceStart) / (traceEnd - traceStart) * 100)}%`}
+              {stage === 'retract' && `${flaps.length}/2 flaps retracted`}
+              {exposed && 'Procedure complete. Exploration and quiz unlocked.'}
             </div>
           </div>
 
-          {/* Organ list (visible from layer 2+) */}
-          {layer >= 2 && (
+          {!exposed && <details className="rounded-xl border border-slate-700 p-3 text-xs text-slate-300">
+            <summary className="cursor-pointer font-semibold">Keyboard / precision controls</summary>
+            <p className="my-3 leading-relaxed">Select the required instrument first. Pins: focus a target or its button and press Enter. Trace: focus the trace control and press or hold Arrow Down; Escape pauses. Flaps: focus a flap, use arrow keys to move into its side target, then Enter to release; Escape cancels. The buttons below place or retract at the same validated targets.</p>
+            {stage === 'pin' && <div className="grid grid-cols-2 gap-2">{PIN_TARGETS.map((_, index) => <button key={index} onClick={() => placePin(index)} disabled={pins.includes(index)} className="rounded-lg bg-slate-700 px-2 py-3 disabled:opacity-40">Place pin {index + 1}</button>)}</div>}
+            {tracing && <button onClick={() => setFeedback('With Scalpel selected, keep this control focused and press or hold Arrow Down to move the tip along the guide.')}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault();
+                  if (tool !== 'scalpel') { setFeedback('Select Scalpel before tracing.'); return; }
+                  cancelTrace();
+                  advanceTrace({ x: 300, y: Math.min(traceEnd, traceY + 8) }, traceY);
+                } else if (event.key === 'Escape') { cancelTrace(); setFeedback('Keyboard trace paused. Arrow Down resumes at the saved tip.'); }
+              }} className="w-full rounded-lg bg-slate-700 px-2 py-3 focus-visible:outline-2 focus-visible:outline-teal-300">Trace guide: Arrow Down</button>}
+            {stage === 'retract' && <div className="grid grid-cols-2 gap-2">{['left', 'right'].map((side) => <button key={side} disabled={flaps.includes(side)} onClick={() => retractFlap(side, { x: side === 'left' ? 222 : 378, y: 300 })} className="rounded-lg bg-slate-700 px-2 py-3 disabled:opacity-40">Retract {side} flap</button>)}</div>}
+          </details>}
+
+          <ol aria-label="Procedure stages" className="space-y-2">
+            {STAGES.map((item, index) => <li key={item.id} aria-current={stage === item.id ? 'step' : undefined} className={`flex items-center gap-2 text-xs ${index === stageIndex ? 'text-teal-200' : 'text-slate-400'}`}>
+              {index < stageIndex ? <Check className="h-4 w-4" /> : <span className="flex h-4 w-4 items-center justify-center">{index + 1}</span>}{item.label}
+            </li>)}
+          </ol>
+
+          {exposed && (
             <div>
               <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
                 {quizMode
@@ -411,7 +589,7 @@ export default function FrogAnatomyLab() {
           )}
 
           {/* Quiz mode */}
-          {layer >= 2 && (
+          {exposed && (
             <div>
               {!quizMode ? (
                 <button onClick={startQuiz}
@@ -441,7 +619,6 @@ export default function FrogAnatomyLab() {
           {/* Completion */}
           {isDone && (
             <div role="status" className="bg-emerald-900/40 border border-emerald-700 rounded-xl p-4 text-center">
-              <div className="text-2xl mb-1">🐸</div>
               <div className="text-emerald-400 font-semibold text-sm">{t('completed.title')}</div>
               <div className="text-emerald-600 text-xs mt-1">{t('completed.subtitle')}</div>
               <p className="text-gray-300 text-xs mt-2 leading-relaxed">
@@ -455,7 +632,7 @@ export default function FrogAnatomyLab() {
           {/* Ethical note */}
           <div className="bg-gray-800/50 rounded-xl p-3 border border-gray-700/50">
             <p className="text-xs text-gray-500 leading-relaxed">
-              🌱 <strong className="text-gray-400">Ethical Alternative:</strong> This virtual dissection preserves animal life while providing the same educational value as physical dissection.
+              <strong className="text-gray-400">Ethical alternative:</strong> A non-graphic virtual model for learning anatomy without animal use. Layers and organ positions are simplified; this is not a guide to physical dissection.
             </p>
           </div>
         </div>

@@ -1,11 +1,11 @@
 'use client';
-import { useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useId, useRef, useState, type PointerEvent } from 'react';
 import { motion } from 'framer-motion';
 import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ScatterChart, Scatter,
 } from 'recharts';
-import { RotateCcw, ChevronLeft, Zap } from 'lucide-react';
-import Link from 'next/link';
+import { Zap } from 'lucide-react';
+import LabWorkspace from '@/components/lab/LabWorkspace';
 import { useStore } from '@/lib/store';
 import { useT } from '@/hooks/useTranslation';
 
@@ -15,22 +15,22 @@ const RESISTORS = [10, 47, 100, 220, 470];
 type Mode = 'circuit' | 'plot';
 type Point = { x: number; y: number };
 const TERMINALS = {
-  positive: { x: 150, y: 100, label: 'Supply +', short: '+' },
-  switchIn: { x: 300, y: 100, label: 'Switch input', short: 'S1' },
-  switchOut: { x: 380, y: 100, label: 'Switch output', short: 'S2' },
-  resistorIn: { x: 450, y: 150, label: 'Resistor input', short: 'R1' },
-  resistorOut: { x: 450, y: 245, label: 'Resistor output', short: 'R2' },
-  ammeterIn: { x: 330, y: 330, label: 'Ammeter +', short: 'A+' },
-  ammeterOut: { x: 270, y: 330, label: 'Ammeter -', short: 'A-' },
-  negative: { x: 150, y: 250, label: 'Supply -', short: '-' },
+  positive: { x: 186, y: 252, label: 'Supply +', short: '+' },
+  switchIn: { x: 306, y: 115, label: 'Switch input', short: 'S1' },
+  switchOut: { x: 392, y: 115, label: 'Switch output', short: 'S2' },
+  resistorIn: { x: 475, y: 128, label: 'Resistor input', short: 'R1' },
+  resistorOut: { x: 595, y: 128, label: 'Resistor output', short: 'R2' },
+  ammeterIn: { x: 425, y: 365, label: 'Ammeter +', short: 'A+' },
+  ammeterOut: { x: 355, y: 365, label: 'Ammeter -', short: 'A-' },
+  negative: { x: 116, y: 252, label: 'Supply -', short: '-' },
 } as const;
 type Terminal = keyof typeof TERMINALS;
 const TERMINAL_IDS = Object.keys(TERMINALS) as Terminal[];
 const CONNECTIONS: { from: Terminal; to: Terminal; path: string }[] = [
-  { from: 'positive', to: 'switchIn', path: 'M150 100 H300' },
-  { from: 'switchOut', to: 'resistorIn', path: 'M380 100 H450 V150' },
-  { from: 'resistorOut', to: 'ammeterIn', path: 'M450 245 V330 H330' },
-  { from: 'ammeterOut', to: 'negative', path: 'M270 330 H150 V250' },
+  { from: 'positive', to: 'switchIn', path: 'M186 252 C186 324 265 302 265 204 S270 115 306 115' },
+  { from: 'switchOut', to: 'resistorIn', path: 'M392 115 C408 51 462 58 475 128' },
+  { from: 'resistorOut', to: 'ammeterIn', path: 'M595 128 C644 139 584 409 487 410 S425 391 425 365' },
+  { from: 'ammeterOut', to: 'negative', path: 'M355 365 C355 435 116 407 116 252' },
 ];
 type Reading = { voltage: number; current: number; resistance: number };
 const INITIAL_FEEDBACK = 'Connect all four leads with the switch open. Drag between terminals, or select two terminal buttons.';
@@ -118,17 +118,20 @@ export default function OhmsLawLab() {
   }
 
   return (
-    <div className="flex min-h-[calc(100dvh-64px)] flex-col bg-gray-900 lg:flex-row" onKeyDown={event => {
+    <LabWorkspace title={t('ohmslaw.title')} subject="Physics"
+      intro="Wire a series circuit, adjust the DC supply and compare current at three voltages. The resistor and meters are ideal: heating, lead resistance and meter loading are ignored."
+      equipment={['DC bench supply', 'Knife switch', 'Resistor board', 'Two digital meters', 'Four patch leads']}
+      steps={['Connect four leads', 'Close switch and adjust voltage', 'Record three voltages', 'Compare I against V']}
+      currentStep={distinctVoltages >= 3 ? 3 : conducting ? 2 : connected ? 1 : 0}
+      complete={completedResistance !== null} onReset={reset}
+      children={<div onKeyDown={event => {
       if (event.key === 'Escape') { setSelected(null); setFeedback('Connection cancelled.'); }
     }}>
 
       {/* ===================== CIRCUIT DISPLAY ===================== */}
-      <div className="min-w-0 flex-1 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-3 sm:p-5">
+      <div className="min-w-0 p-3 sm:p-5">
 
         <div className="flex items-center justify-between gap-3">
-        <Link href="/lab" className="flex min-h-11 items-center gap-1 text-xs text-gray-300 hover:text-white bg-gray-800/80 rounded-full px-3 py-2">
-          <ChevronLeft className="h-3 w-3" /> Back
-        </Link>
 
         {/* Mode toggle */}
         <div className="flex rounded-xl overflow-hidden border border-gray-700" aria-label="Lab view">
@@ -213,24 +216,8 @@ export default function OhmsLawLab() {
           </ul>
           <p role="status" aria-live="polite" aria-atomic="true" className="rounded-lg border border-amber-700/60 bg-amber-950/30 p-3 text-amber-200">{feedback}</p>
         </section>
-      </div>
-
-      {/* ===================== CONTROLS ===================== */}
-      <div className="flex w-full flex-col border-t border-gray-700 bg-gray-900 text-white lg:w-[360px] lg:shrink-0 lg:border-l lg:border-t-0">
-        <div className="p-4 border-b border-gray-700">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="font-bold text-base">{t('ohmslaw.title')}</h2>
-              <p className="text-gray-400 text-xs mt-0.5">{t('ohmslaw.subtitle')}</p>
-            </div>
-            <button onClick={reset} aria-label="Reset circuit and all observations" title="Reset circuit and all observations"
-              className="flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-800 hover:text-white transition-colors">
-              <RotateCcw className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
-        <div className="p-4 space-y-5 flex-1">
+      </div></div>}
+      controls={<div className="grid min-w-0 grid-cols-1 gap-5 text-white [overflow-wrap:anywhere] md:grid-cols-2">
           {/* Battery voltage */}
           <div>
             <label htmlFor="ohms-voltage" className="text-xs font-semibold text-gray-400 uppercase tracking-wide block mb-2">
@@ -259,13 +246,15 @@ export default function OhmsLawLab() {
             <div className="space-y-1.5">
               {RESISTORS.map((r) => (
                 <button key={r}
-                  onClick={() => { setRes(r); setFeedback(`Resistor set to ${r} Ω. Readings are grouped by resistance; collect three distinct voltages for one resistor.`); }} aria-pressed={resistance === r}
-                  className={`min-h-11 w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-all ${resistance === r ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
+                  disabled={switchOn}
+                  onClick={() => { if (switchOn) return; setRes(r); setFeedback(`Resistor set to ${r} Ω. Readings are grouped by resistance; collect three distinct voltages for one resistor.`); }} aria-pressed={resistance === r}
+                  className={`min-h-11 w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50 ${resistance === r ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
                   <span className="font-mono">{r} Ω</span>
                   <span className="text-xs opacity-80">{readings.filter(reading => reading.resistance === r).length} recorded</span>
                 </button>
               ))}
             </div>
+            <p className="mt-2 text-xs text-gray-400">Open the switch before replacing the resistor. Bands identify its nominal value; the model uses exact resistance.</p>
           </div>
 
           {/* Switch */}
@@ -315,7 +304,9 @@ export default function OhmsLawLab() {
             </div>
           </div>
 
-          <section className="space-y-3 rounded-xl bg-gray-800 p-4" aria-label="Observation notebook">
+      </div>}
+      observations={<>
+          <section className="space-y-3" aria-label="Recorded electrical observations">
             <h3 className="text-sm font-semibold">Observation Notebook</h3>
             <p className="text-xs text-gray-300">{distinctVoltages}/3 distinct voltages at {resistance} Ω. Changing resistance keeps separate sets; it does not combine them.</p>
             <button onClick={recordReading} disabled={!conducting || voltage <= 0 || duplicate}
@@ -340,9 +331,9 @@ export default function OhmsLawLab() {
           </button> : <div className="bg-green-900/40 border border-green-700 rounded-xl p-4 text-center text-sm text-green-300">
             Experiment complete: verified at {completedResistance} Ω using recorded observations.
           </div>}
-        </div>
-      </div>
-    </div>
+      </>}
+      conclusion={distinctVoltages >= 3 ? `At ${resistance} Ω, recorded V/I = ${measuredResistance?.toFixed(2)} Ω. The I-versus-V slope is ${slope?.toFixed(3)} mA/V. Current is proportional to voltage at fixed resistance.` : 'Collect at least three nonzero voltages for one resistor. Compare the recorded I-versus-V plot, not theoretical points.'}
+    />
   );
 }
 
@@ -352,10 +343,35 @@ function CircuitDiagram({ voltage, resistance, current, switchOn, conducting, le
   onSelect: (terminal: Terminal) => void; onConnect: (from: Terminal, to: Terminal) => void;
   onToggleSwitch: () => void; onVoltage: (voltage: number) => void; onFeedback: (message: string) => void;
 }) {
-  const wireColor = current > 0 ? '#f59e0b' : '#9ca3af';
-  const glow = current > 0 ? `drop-shadow(0 0 ${ledBrightness * 10}px rgba(251,191,36,0.8))` : 'none';
+  const id = useId().replace(/:/g, '');
+  const knob = useRef<number | null>(null);
+  const knobElement = useRef<SVGGElement>(null);
+  const bands = resistance === 10 ? ['#713f12', '#171717', '#171717']
+    : resistance === 47 ? ['#eab308', '#7c3aed', '#171717']
+    : resistance === 100 ? ['#713f12', '#171717', '#713f12']
+    : resistance === 220 ? ['#dc2626', '#dc2626', '#713f12'] : ['#eab308', '#7c3aed', '#713f12'];
   const drag = useRef<{ from: Terminal; pointerId: number; clientX: number; clientY: number; moved: boolean } | null>(null);
   const [preview, setPreview] = useState<{ from: Terminal; point: Point; target: Terminal | null } | null>(null);
+
+  useEffect(() => {
+    const element = knobElement.current;
+    if (!element) return;
+    // A non-passive listener keeps wheel adjustment from scrolling the bench away.
+    function wheel(event: WheelEvent) {
+      event.preventDefault();
+      if (event.deltaY) onVoltage(Math.max(0, Math.min(9, Number((voltage + (event.deltaY < 0 ? .1 : -.1)).toFixed(1)))));
+    }
+    element.addEventListener('wheel', wheel, { passive: false });
+    return () => element.removeEventListener('wheel', wheel);
+  }, [voltage, onVoltage]);
+
+  function turnKnob(event: PointerEvent<SVGGElement>) {
+    const matrix = event.currentTarget.ownerSVGElement?.getScreenCTM();
+    if (!matrix) return;
+    const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
+    const degrees = Math.atan2(point.x - 151, 185 - point.y) * 180 / Math.PI;
+    onVoltage(Math.round(Math.max(0, Math.min(9, (degrees + 135) / 270 * 9)) * 10) / 10);
+  }
 
   function pointerPosition(event: PointerEvent<SVGCircleElement>) {
     const matrix = event.currentTarget.ownerSVGElement?.getScreenCTM();
@@ -367,129 +383,113 @@ function CircuitDiagram({ voltage, resistance, current, switchOn, conducting, le
   }
 
   return (
-    <svg viewBox="0 0 600 430" className="my-3 block h-auto w-full" aria-label="Interactive Ohm's law circuit" onKeyDown={event => {
-      if (event.key === 'Escape') { drag.current = null; setPreview(null); }
+    <svg viewBox="0 0 800 460" className="my-3 block h-auto w-full" aria-label="Interactive Ohm's law circuit" onKeyDown={event => {
+      if (event.key === 'Escape') { drag.current = null; knob.current = null; setPreview(null); }
     }}>
       <title>Wire the supply, switch, resistor and ammeter in series</title>
       <desc>Drag between labeled terminals, or use the terminal buttons below the diagram. The switch and supply plus and minus controls also respond to Enter or Space.</desc>
-      {/* Background grid */}
-      {Array.from({ length: 13 }, (_, i) => (
-        <line key={`gv${i}`} x1={i * 50} y1="0" x2={i * 50} y2="430" stroke="#1f2937" strokeWidth="1" />
-      ))}
-      {Array.from({ length: 9 }, (_, i) => (
-        <line key={`gh${i}`} x1="0" y1={i * 50} x2="600" y2={i * 50} stroke="#1f2937" strokeWidth="1" />
-      ))}
-
-      {/* Dashed guides do not conduct; only accepted student wires close the circuit. */}
-      {CONNECTIONS.map((wire, index) => <path key={index} d={wire.path} fill="none"
-        stroke={wires.includes(index) ? wireColor : '#374151'} strokeWidth={wires.includes(index) ? 4 : 2}
-        strokeDasharray={wires.includes(index) ? undefined : '5 7'} strokeLinecap="round" pointerEvents="none" />)}
-      {preview && <line x1={TERMINALS[preview.from].x} y1={TERMINALS[preview.from].y}
-        x2={preview.target ? TERMINALS[preview.target].x : preview.point.x}
-        y2={preview.target ? TERMINALS[preview.target].y : preview.point.y}
-        stroke="#fbbf24" strokeWidth="3" strokeDasharray="6 4" pointerEvents="none" />}
-
-      {/* ===== BATTERY ===== */}
-      <rect x="115" y="100" width="70" height="150" rx="8" fill="#1f2937" stroke="#374151" strokeWidth="2" />
-      <text x="150" y="128" textAnchor="middle" fontSize="10" fill="#9ca3af">DC SUPPLY</text>
-      {/* + pole */}
-      <line x1="150" y1="140" x2="150" y2="155" stroke="#ef4444" strokeWidth="3" />
-      <line x1="143" y1="147" x2="157" y2="147" stroke="#ef4444" strokeWidth="3" />
-      {/* Voltage bars */}
-      {Array.from({ length: Math.round(voltage / 1.5) }, (_, i) => (
-        <rect key={i} x="128" y={160 + i * 10} width="44" height="7" rx="2" fill="#f59e0b" opacity={0.4 + i * 0.1} />
-      ))}
-      <text x="150" y="236" textAnchor="middle" fontSize="16" fill="#f59e0b" fontWeight="700">{voltage}V</text>
-      {/* - pole */}
-      <line x1="143" y1="246" x2="157" y2="246" stroke="#3b82f6" strokeWidth="3" />
+      <defs>
+        <linearGradient id={`${id}-metal`} x2="0" y2="1"><stop stopColor="#d0d6d8"/><stop offset="1" stopColor="#8b969e"/></linearGradient>
+        <linearGradient id={`${id}-ceramic`} x2="0" y2="1"><stop stopColor="#baa16f"/><stop offset=".35" stopColor="#f1d7a2"/><stop offset="1" stopColor="#a88a54"/></linearGradient>
+        <filter id={`${id}-shadow`} x="-20%" y="-20%" width="150%" height="160%"><feDropShadow dx="3" dy="6" stdDeviation="3" floodOpacity=".35"/></filter>
+      </defs>
+      <rect x="4" y="4" width="792" height="452" rx="10" fill="#253b3b"/>
+      {Array.from({ length: 20 }, (_, i) => <path key={i} d={`M${i*40} 40 V425 M20 ${i*40} H780`} stroke="#a7c3ba" opacity=".06"/>)}
+      <text x="28" y="30" fill="#b8cbc5" fontSize="12" letterSpacing="3">ELECTRICITY / BENCH 01</text>
+      <g filter={`url(#${id}-shadow)`}>
+        <path d="M48 79 L65 63 H237 V267 L220 284 H48Z" fill="#596770"/>
+        <rect x="48" y="79" width="172" height="205" rx="6" fill={`url(#${id}-metal)`} stroke="#e2e8f0"/>
+        <text x="64" y="100" fontSize="10" fill="#24333d" fontWeight="700">REGULATED DC / 0-9 V</text>
+        <rect x="65" y="112" width="138" height="38" rx="3" fill="#1e2d29" stroke="#66736e" strokeWidth="3"/>
+        <text x="190" y="139" textAnchor="end" fontFamily="monospace" fontSize="25" fill="#c9e5bd">{voltage.toFixed(1)} V</text>
+        <circle cx="77" cy="184" r="5" fill={conducting ? '#75b97c' : '#394c40'}/>
+        <text x="64" y="205" fontSize="8" fill="#24333d">OUTPUT</text>
+        <text x="151" y="227" textAnchor="middle" fontSize="9" fill="#24333d">VOLTAGE</text>
+        {[60,208].map(x => <g key={x}><circle cx={x} cy="271" r="3" fill="#58666e"/><path d={`M${x-2} 271 h4`} stroke="#ccd5da"/></g>)}
+      </g>
+      <g ref={knobElement} role="slider" tabIndex={0} aria-label="Supply voltage knob" aria-valuemin={0} aria-valuemax={9} aria-valuenow={voltage} aria-valuetext={`${voltage.toFixed(1)} volts`}
+        className="cursor-grab focus-visible:outline-2 focus-visible:outline-amber-300" style={{ touchAction: 'none' }}
+        onPointerDown={event => { if (event.button !== 0 || !event.isPrimary) return; event.preventDefault(); event.currentTarget.focus(); knob.current = event.pointerId; event.currentTarget.setPointerCapture(event.pointerId); turnKnob(event); }}
+        onPointerMove={event => { if (knob.current === event.pointerId) turnKnob(event); }}
+        onPointerUp={event => { if (knob.current !== event.pointerId) return; turnKnob(event); knob.current = null; event.currentTarget.releasePointerCapture(event.pointerId); }}
+        onPointerCancel={() => { knob.current = null; }} onLostPointerCapture={() => { knob.current = null; }}
+        onKeyDown={event => { const delta = { ArrowUp: .1, ArrowRight: .1, ArrowDown: -.1, ArrowLeft: -.1, PageUp: 1, PageDown: -1 }[event.key]; if (delta !== undefined || event.key === 'Home' || event.key === 'End') { event.preventDefault(); onVoltage(event.key === 'Home' ? 0 : event.key === 'End' ? 9 : Math.max(0, Math.min(9, Number((voltage + (delta ?? 0)).toFixed(1))))); } }}>
+        <title>Drag around the knob, scroll, or use arrow keys to adjust voltage</title>
+        <circle cx="151" cy="185" r="31" fill="#65717a" stroke="#eff2f3"/>
+        <circle cx="151" cy="185" r="25" fill="#263139" stroke="#101a21" strokeWidth="4"/>
+        {Array.from({ length: 10 }, (_, i) => <path key={i} d="M151 150 v4" stroke="#263139" transform={`rotate(${-135+i*30} 151 185)`}/>)}
+        <path d="M151 183 V164" stroke="#f4e4b5" strokeWidth="3" strokeLinecap="round" transform={`rotate(${-135+voltage*30} 151 185)`}/>
+      </g>
       {([-1, 1] as const).map(direction => <g key={direction} role="button" tabIndex={0}
         aria-label={`${direction < 0 ? 'Decrease' : 'Increase'} supply voltage by 0.5 volts`}
         className="cursor-pointer focus-visible:outline-2 focus-visible:outline-amber-300"
         onClick={() => onVoltage(Math.max(0, Math.min(9, Number((voltage + direction * 0.5).toFixed(1)))))}
         onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onVoltage(Math.max(0, Math.min(9, Number((voltage + direction * 0.5).toFixed(1))))); } }}>
-        <rect x={direction < 0 ? 95 : 155} y="30" width="50" height="44" rx="8" fill="#1f2937" stroke="#9ca3af" />
-        <text x={direction < 0 ? 120 : 180} y="58" textAnchor="middle" fontSize="22" fill="#fbbf24">{direction < 0 ? '-' : '+'}</text>
+        <rect x={direction < 0 ? 51 : 173} y="297" width="44" height="44" rx="6" fill="#1f2937" stroke="#9ca3af" />
+        <text x={direction < 0 ? 73 : 195} y="325" textAnchor="middle" fontSize="22" fill="#fbbf24">{direction < 0 ? '-' : '+'}</text>
       </g>)}
 
       {/* ===== SWITCH ===== */}
       <g role="switch" tabIndex={0} aria-label="Switch on diagram" aria-checked={switchOn}
         className="cursor-pointer focus-visible:outline-2 focus-visible:outline-amber-300"
         onClick={onToggleSwitch} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onToggleSwitch(); } }}>
-        <rect x="317" y="65" width="46" height="68" rx="8" fill="#111827" />
-        <circle cx="300" cy="100" r="12" fill="#1f2937" stroke="#374151" strokeWidth="2" />
-        <circle cx="380" cy="100" r="12" fill="#1f2937" stroke="#374151" strokeWidth="2" />
+        <rect x="281" y="83" width="135" height="79" rx="6" fill="#17232a" stroke="#687780" filter={`url(#${id}-shadow)`}/>
         {/* Switch arm */}
         <line
-          x1="312" y1="100"
-          x2={switchOn ? "368" : "355"}
-          y2={switchOn ? "100" : "80"}
-          stroke={switchOn ? '#10b981' : '#6b7280'}
-          strokeWidth="3" strokeLinecap="round"
+          x1="306" y1="115"
+          x2={switchOn ? "392" : "370"}
+          y2={switchOn ? "115" : "86"}
+          stroke="#c7a66b"
+          strokeWidth="7" strokeLinecap="round"
         />
-        <text x="340" y="75" textAnchor="middle" fontSize="9" fill="#9ca3af">SWITCH</text>
-        <text x="340" y="120" textAnchor="middle" fontSize="8" fill={switchOn ? '#10b981' : '#9ca3af'}>
+        <rect x="334" y={switchOn ? 105 : 89} width="28" height="16" rx="4" fill="#923f31"/>
+        <text x="350" y="148" textAnchor="middle" fontSize="10" fill={switchOn ? '#a7d8a0' : '#cbd5e1'}>
           {switchOn ? 'CLOSED' : 'OPEN'}
         </text>
       </g>
 
       {/* ===== RESISTOR ===== */}
       <g>
-        <rect x="405" y="180" width="90" height="45" rx="6" fill="#1f2937" stroke="#6b7280" strokeWidth="2" />
-        {/* Resistor bands */}
-        {[0,1,2,3].map((i) => (
-          <rect key={i} x={415 + i * 18} y="183" width="10" height="39" rx="2"
-            fill={['#f59e0b','#6366f1','#374151','#9ca3af'][i]} opacity="0.8" />
-        ))}
-        <text x="395" y="200" textAnchor="end" fontSize="11" fill="#a5b4fc" fontWeight="600">{resistance} Ω</text>
-        <text x="395" y="214" textAnchor="end" fontSize="9" fill="#9ca3af">RESISTOR</text>
-        {/* Connection wires */}
-        <line x1="450" y1="150" x2="450" y2="180" stroke={wireColor} strokeWidth="3" />
-        <line x1="450" y1="225" x2="450" y2="245" stroke={wireColor} strokeWidth="3" />
+        <rect x="448" y="87" width="175" height="87" rx="6" fill="#78533a" stroke="#ad8b68" filter={`url(#${id}-shadow)`}/>
+        <path d="M475 128 H595" stroke="#c4cbd0" strokeWidth="4"/>
+        <rect x="497" y="114" width="77" height="28" rx="11" fill={`url(#${id}-ceramic)`} stroke="#957748"/>
+        {[...bands, '#b89443'].map((color, i) => <rect key={i} x={507 + i*15 + (i===3 ? 5 : 0)} y="115" width="6" height="26" fill={color}/>)}
+        <text x="535" y="161" textAnchor="middle" fontSize="11" fill="#fff0ce">{resistance} Ω / NOMINAL</text>
       </g>
 
-      {/* ===== AMMETER (on bottom wire) ===== */}
-      <g>
-        <line x1="270" y1="330" x2="330" y2="330" stroke={wireColor} strokeWidth="3" />
-        <circle cx="300" cy="330" r="22" fill="#1f2937" stroke="#374151" strokeWidth="2" />
-        <text x="300" y="325" textAnchor="middle" fontSize="11" fill="#9ca3af" fontWeight="700">A</text>
-        <text x="300" y="338" textAnchor="middle" fontSize="8" fill={conducting ? '#10b981' : '#9ca3af'}>
-          {(current * 1000).toFixed(2)}
-        </text>
-        <text x="300" y="365" textAnchor="middle" fontSize="10" fill="#9ca3af">mA</text>
-      </g>
-
-      {/* The original LED visual is a non-loading current indicator, not a diode in series. */}
-      <g transform="translate(-110 -30)" style={{ filter: glow }} pointerEvents="none">
-        {/* LED body */}
-        <polygon points="430,270 470,270 450,310" fill={`rgba(251,191,36,${0.2 + ledBrightness * 0.8})`} stroke="#f59e0b" strokeWidth="2" />
-        <line x1="430" y1="270" x2="470" y2="270" stroke="#f59e0b" strokeWidth="2" />
-        <line x1="430" y1="310" x2="470" y2="310" stroke="#f59e0b" strokeWidth="2" />
-        {/* LED glow */}
-        {conducting && ledBrightness > 0.1 && (
-          <>
-            <circle cx="450" cy="290" r={20 + ledBrightness * 25} fill={`rgba(251,191,36,${ledBrightness * 0.15})`} />
-            <circle cx="450" cy="290" r={10 + ledBrightness * 12} fill={`rgba(251,191,36,${ledBrightness * 0.25})`} />
-          </>
-        )}
-        <text x="450" y="325" textAnchor="middle" fontSize="9" fill="#9ca3af">INDICATOR ONLY</text>
-      </g>
-
-      {/* Ideal voltmeter probes are fixed across the resistor, not the indicator. */}
-      <g>
-        <path d="M450 150 H540 V174 M450 245 H540 V229" fill="none" stroke="#60a5fa" strokeWidth="1.5" strokeDasharray="3 3" />
-        <rect x="510" y="174" width="60" height="55" rx="8" fill="#1f2937" stroke="#60a5fa" strokeWidth="1.5" />
-        <text x="540" y="193" textAnchor="middle" fontSize="9" fill="#9ca3af">V-METER</text>
-        <text x="540" y="211" textAnchor="middle" fontSize="12" fill="#60a5fa" fontWeight="700">
-          {conducting ? `${voltage.toFixed(1)}V` : '0.0V'}
-        </text>
+      {[{ x: 315, label: 'DC AMMETER', unit: 'mA', value: (current*1000).toFixed(2) }, { x: 620, label: 'DC VOLTMETER', unit: 'V', value: conducting ? voltage.toFixed(1) : '0.0' }].map(meter => <g key={meter.unit} transform={`translate(${meter.x} 209)`}>
+        <rect width="150" height="178" rx="17" fill="#bd933c" stroke="#e1b859" strokeWidth="3" filter={`url(#${id}-shadow)`}/>
+        <rect x="8" y="8" width="134" height="155" rx="11" fill="#293238"/>
+        <text x="75" y="27" textAnchor="middle" fontSize="10" fill="#e5e7eb">{meter.label}</text>
+        <rect x="19" y="37" width="112" height="43" rx="3" fill="#c1ccb3" stroke="#111d23" strokeWidth="4"/>
+        <text x="123" y="64" textAnchor="end" fontSize="23" fontFamily="monospace" fill="#263b30">{meter.value}</text>
+        <circle cx="75" cy="112" r="24" fill="#172127" stroke="#667278" strokeWidth="2"/>
+        <path d="M75 110 L87 95" stroke="#e4e8ea" strokeWidth="3"/>
+        <text x="112" y="99" fontSize="10" fill="#d1d5db">{meter.unit}</text>
+        {meter.unit === 'V' && <><text x="40" y="140" textAnchor="middle" fontSize="8" fill="#e5e7eb">COM</text><text x="110" y="140" textAnchor="middle" fontSize="8" fill="#e5e7eb">V</text></>}
+        {meter.unit === 'V' && [40,110].map((x,i) => <circle key={x} cx={x} cy="156" r="9" fill="#101820" stroke={i ? '#bf5145' : '#75818a'} strokeWidth="4"/>)}
+      </g>)}
+      <circle cx="288" cy="218" r="6" fill={`rgb(${75+Math.round(ledBrightness*160)}, ${65+Math.round(ledBrightness*100)}, 40)`} stroke="#a09c83"/>
+      <text x="288" y="238" textAnchor="middle" fontSize="8" fill="#bdcbc7">I indicator</text>
+      {/* Insulated cables retain their physical color, whether or not current flows. */}
+      <g fill="none" strokeLinecap="round" pointerEvents="none">
+        <path d="M475 128 C450 203 780 168 784 216 S798 414 756 404 Q730 398 730 365" stroke="#ad4940" strokeWidth="4"/>
+        <path d="M595 128 C629 175 598 305 603 359 S657 422 660 365" stroke="#151e26" strokeWidth="4"/>
+        {CONNECTIONS.map((wire, index) => <g key={index}>
+          {wires.includes(index) && <path d={wire.path} stroke="#071419" strokeWidth="9" transform="translate(2 3)" opacity=".45"/>}
+          <path d={wire.path} stroke={wires.includes(index) ? index === 3 ? '#141d25' : '#ba4d40' : '#92a7a0'} strokeWidth={wires.includes(index) ? 6 : 1.5} strokeDasharray={wires.includes(index) ? undefined : '4 7'} opacity={wires.includes(index) ? 1 : .4}/>
+          {wires.includes(index) && <path d={wire.path} stroke={index === 3 ? '#6b7883' : '#e98b74'} strokeWidth="1" opacity=".55"/>}
+        </g>)}
+        {preview && <path d={`M${TERMINALS[preview.from].x} ${TERMINALS[preview.from].y} Q${TERMINALS[preview.from].x} ${(preview.target ? TERMINALS[preview.target].y : preview.point.y)+50} ${preview.target ? TERMINALS[preview.target].x : preview.point.x} ${preview.target ? TERMINALS[preview.target].y : preview.point.y}`} stroke="#fbbf24" strokeWidth="4" strokeDasharray="6 4"/>}
       </g>
 
       {TERMINAL_IDS.map(id => {
         const terminal = TERMINALS[id];
         const highlighted = selected === id || preview?.target === id;
         return <g key={id}>
-          <circle cx={terminal.x} cy={terminal.y} r="10" fill={highlighted ? '#f59e0b' : '#111827'} stroke={highlighted ? '#fcd34d' : '#d1d5db'} strokeWidth="2" pointerEvents="none" />
-          <text x={terminal.x} y={terminal.y - 28} textAnchor="middle" fontSize="11" fill="#e5e7eb" pointerEvents="none">{terminal.short}</text>
+          <circle cx={terminal.x} cy={terminal.y} r="11" fill="#202a31" stroke={highlighted ? '#fcd34d' : id === 'negative' || id === 'ammeterOut' ? '#7a8792' : '#c55848'} strokeWidth="4" pointerEvents="none" />
+          <circle cx={terminal.x} cy={terminal.y} r="5" fill="#10181c" stroke="#b7a785" strokeWidth="2" pointerEvents="none"/>
+          <text x={terminal.x} y={terminal.y - 18} textAnchor="middle" fontSize="10" fill={id === 'negative' || id === 'positive' ? '#24333d' : '#e5e7eb'} pointerEvents="none">{terminal.short}</text>
           <circle cx={terminal.x} cy={terminal.y} r="23" fill="transparent" role="button" tabIndex={0}
             aria-label={`${terminal.label} terminal`} aria-pressed={selected === id}
             className="cursor-crosshair focus-visible:outline-2 focus-visible:outline-amber-300" style={{ touchAction: 'none' }}
@@ -528,8 +528,8 @@ function CircuitDiagram({ voltage, resistance, current, switchOn, conducting, le
 
       {/* Ohm's law callout */}
       <g>
-        <rect x="30" y="370" width="540" height="32" rx="8" fill="rgba(245,158,11,0.1)" stroke="rgba(245,158,11,0.3)" strokeWidth="1" />
-        <text x="300" y="390" textAnchor="middle" fontSize="12" fill="#f59e0b" fontWeight="700">
+        <rect x="20" y="423" width="760" height="26" rx="4" fill="#172c2c" />
+        <text x="400" y="441" textAnchor="middle" fontSize="12" fill="#e4d2a2" fontWeight="700">
           {conducting
             ? `V = I × R: ${voltage.toFixed(1)} V ≈ ${current.toFixed(5)} A × ${resistance} Ω`
             : `V = I × R | ${wires.length < CONNECTIONS.length ? 'Connect the four leads first' : 'Close the switch to measure'}`}
@@ -551,7 +551,7 @@ function Meter({ label, value, unit, color }: { label: string; value: string; un
 
 function ReadingRow({ label, value, color }: { label: string; value: string; color: string }) {
   return (
-    <div className="flex items-center justify-between text-sm">
+    <div className="flex flex-wrap items-center justify-between gap-x-3 text-sm">
       <span className="text-gray-400">{label}</span>
       <span className={`font-mono font-semibold ${color}`}>{value}</span>
     </div>

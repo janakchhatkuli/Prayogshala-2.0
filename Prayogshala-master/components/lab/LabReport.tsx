@@ -21,6 +21,7 @@ export default function LabReport({ experimentId, data, onClose }: Props) {
   const t = useT();
   const { currentUser } = useStore();
   const [generating, setGenerating] = useState(false);
+  const [downloadError, setDownloadError] = useState('');
 
   const today = new Date().toLocaleDateString('en-GB', {
     day: '2-digit',
@@ -30,6 +31,7 @@ export default function LabReport({ experimentId, data, onClose }: Props) {
 
   const handleDownload = async () => {
     setGenerating(true);
+    setDownloadError('');
     try {
       const { default: jsPDF } = await import('jspdf');
       const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -101,14 +103,12 @@ export default function LabReport({ experimentId, data, onClose }: Props) {
       doc.setFontSize(9);
       doc.setTextColor(50, 50, 50);
       const apparatus = [
-        '• Burette (50 mL)',
-        '• Conical flask (250 mL)',
-        '• Pipette (25 mL)',
-        '• Burette stand and clamp',
-        '• NaOH solution (0.1 mol/L)',
-        '• HCl solution (unknown concentration)',
-        '• Phenolphthalein indicator',
-        '• Distilled water',
+        '- Burette (50 mL), stand and adjustable clamp',
+        '- Conical flask, HCl reservoir beaker',
+        '- Pipette (25 mL) with safety bulb',
+        '- Funnel and NaOH bottle (0.1 mol/L)',
+        '- HCl solution (unknown concentration)',
+        '- Phenolphthalein indicator dropper',
       ];
       apparatus.forEach((item) => {
         doc.text(item, margin + 3, y);
@@ -139,7 +139,8 @@ export default function LabReport({ experimentId, data, onClose }: Props) {
         ['Volume of NaOH at endpoint', `${data.volumeDispensed.toFixed(2)} mL`],
         ['pH at endpoint', data.endpointPH.toFixed(2)],
         ['Indicator used', 'Phenolphthalein'],
-        ['Colour change at endpoint', 'Colourless → Permanent pink'],
+        ['Colour change at endpoint', 'Colourless to persistent pink'],
+        ['Room temperature', '25 C'],
       ];
 
       rows.forEach((row, idx) => {
@@ -154,6 +155,9 @@ export default function LabReport({ experimentId, data, onClose }: Props) {
       y += 8;
 
       // Calculations
+      // Keep the calculation, result and conclusion together above the footer.
+      doc.addPage();
+      y = margin;
       doc.setFontSize(12);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(37, 99, 235);
@@ -163,10 +167,10 @@ export default function LabReport({ experimentId, data, onClose }: Props) {
       doc.setFontSize(9);
       doc.setTextColor(50, 50, 50);
       const calcLines = [
-        'Using M₁V₁ = M₂V₂ (Molarity equation):',
-        `M(NaOH) × V(NaOH) = M(HCl) × V(HCl)`,
-        `0.1 × ${data.volumeDispensed.toFixed(2)} = M(HCl) × 25.0`,
-        `M(HCl) = (0.1 × ${data.volumeDispensed.toFixed(2)}) / 25.0`,
+        'Using M1 V1 = M2 V2 (1:1 neutralization):',
+        'M(NaOH) * V(NaOH) = M(HCl) * V(HCl)',
+        `0.1 * ${data.volumeDispensed.toFixed(2)} = M(HCl) * 25.0`,
+        `M(HCl) = (0.1 * ${data.volumeDispensed.toFixed(2)}) / 25.0`,
         `M(HCl) = ${data.calculatedConcentration.toFixed(4)} mol/L`,
       ];
       calcLines.forEach((line) => {
@@ -194,6 +198,15 @@ export default function LabReport({ experimentId, data, onClose }: Props) {
       );
       y += 22;
 
+      doc.setFontSize(10);
+      doc.setTextColor(50, 50, 50);
+      const conclusion = doc.splitTextToSize(
+        `Expected equivalence: 25.00 mL at pH 7 (25 C). The first persistent pink occurs slightly beyond equivalence. Expected HCl: 0.1000 mol/L; relative error: ${((data.calculatedConcentration / 0.1 - 1) * 100).toFixed(2)}%. HCl and NaOH react in a 1:1 mole ratio. Assumptions: ideal solutions, continuous mixing, negligible indicator volume and pre-rinsed, air-free apparatus.`,
+        170
+      );
+      doc.text(conclusion, margin, y);
+      y += conclusion.length * 5 + 8;
+
       // Signature
       doc.setDrawColor(200, 200, 200);
       doc.line(margin, y + 10, margin + 60, y + 10);
@@ -202,15 +215,19 @@ export default function LabReport({ experimentId, data, onClose }: Props) {
       doc.text('Student Signature', margin, y + 16);
 
       // Footer
-      doc.setFillColor(37, 99, 235);
-      doc.rect(0, 282, 210, 15, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(8);
-      doc.text('PrayogShala — Nepal\'s Virtual Science Laboratory', 105, 291, { align: 'center' });
+      for (let page = 1; page <= doc.getNumberOfPages(); page++) {
+        doc.setPage(page);
+        doc.setFillColor(37, 99, 235);
+        doc.rect(0, 282, 210, 15, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(8);
+        doc.text(`PrayogShala - Nepal's Virtual Science Laboratory | Page ${page}`, 105, 291, { align: 'center' });
+      }
 
       doc.save(`lab-report-titration-${Date.now()}.pdf`);
     } catch (error) {
       console.error('PDF generation failed:', error);
+      setDownloadError('PDF download failed. Please try again.');
     } finally {
       setGenerating(false);
     }
@@ -218,7 +235,7 @@ export default function LabReport({ experimentId, data, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <div role="dialog" aria-modal="true" aria-label="Titration lab report" className="bg-white text-slate-900 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="bg-blue-600 text-white rounded-t-2xl p-5">
           <div className="flex items-center justify-between">
@@ -226,7 +243,7 @@ export default function LabReport({ experimentId, data, onClose }: Props) {
               <h2 className="text-lg font-bold">{t('report.title')}</h2>
               <p className="text-blue-200 text-sm mt-0.5">Acid-Base Titration</p>
             </div>
-            <button onClick={onClose} className="rounded-full p-1.5 hover:bg-blue-700 transition-colors">
+            <button onClick={onClose} aria-label="Close lab report" className="rounded-full p-1.5 hover:bg-blue-700 transition-colors">
               <X className="h-5 w-5" />
             </button>
           </div>
@@ -267,7 +284,9 @@ export default function LabReport({ experimentId, data, onClose }: Props) {
               The concentration of HCl is {data.calculatedConcentration.toFixed(4)} mol/L,
               determined using M₁V₁ = M₂V₂ with NaOH (0.1 mol/L, {data.volumeDispensed.toFixed(2)} mL).
             </p>
+            <p className="text-green-700 mt-2">At 25 C, expected equivalence is 25.00 mL at pH 7. The indicator endpoint follows slightly later. Expected [HCl]: 0.1000 mol/L; relative error: {((data.calculatedConcentration / 0.1 - 1) * 100).toFixed(2)}%.</p>
           </div>
+          {downloadError && <p role="alert" className="text-sm text-red-700">{downloadError}</p>}
         </div>
 
         {/* Actions */}
