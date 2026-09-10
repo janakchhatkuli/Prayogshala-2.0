@@ -1,0 +1,151 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-primary: #2563EB;
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-200: #bfdbfe;
+  --color-primary-600: #2563EB;
+  --color-primary-700: #1d4ed8;
+  --color-primary-800: #1e40af;
+
+  --color-success: #10B981;
+  --color-success-50: #ecfdf5;
+  --color-success-100: #d1fae5;
+  --color-success-600: #10B981;
+  --color-success-700: #059669;
+
+  --color-warning: #F59E0B;
+  --color-warning-50: #fffbeb;
+  --color-warning-100: #fef3c7;
+  --color-warning-600: #F59E0B;
+
+  --color-danger: #EF4444;
+  --color-danger-50: #fef2f2;
+  --color-danger-600: #EF4444;
+
+  --color-lab-bench: #d4c9b0;
+  --color-lab-wall: #f5f5f0;
+
+  --font-sans: var(--font-noto-sans), "Segoe UI", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #f8f9fa;
+  color: #1a1a2e;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Nepali text rendering */
+[lang="ne"] {
+  font-family: "Noto Sans Devanagari", var(--font-sans);
+  line-height: 1.7;
+}
+
+/* Lab bench gradient */
+.lab-bench-bg {
+  background: linear-gradient(180deg, #e8e3d5 0%, #d4c9b0 100%);
+}
+
+/* Glass / tube effect for burette */
+.burette-glass {
+  fill: rgba(200, 230, 255, 0.3);
+  stroke: #93c5fd;
+  stroke-width: 1.5;
+}
+
+/* Flask liquid animation */
+@keyframes liquidRipple {
+  0%, 100% { d: path("M 50 80 Q 55 78 60 80 Q 65 82 70 80 L 70 90 L 50 90 Z"); }
+  50% { d: path("M 50 80 Q 55 82 60 80 Q 65 78 70 80 L 70 90 L 50 90 Z"); }
+}
+
+/* Drop fall animation */
+@keyframes dropFall {
+  0% { transform: translateY(0); opacity: 1; }
+  100% { transform: translateY(80px); opacity: 0; }
+}
+
+.drop-falling {
+  animation: dropFall 0.6s ease-in forwards;
+}
+
+/* Pulse on endpoint */
+@keyframes endpointPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(236, 72, 153, 0.4); }
+  50% { box-shadow: 0 0 0 20px rgba(236, 72, 153, 0); }
+}
+
+.endpoint-pulse {
+  animation: endpointPulse 1.5s ease-in-out infinite;
+}
+
+/* Confetti animation */
+@keyframes confettiFall {
+  0% { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+}
+
+/* LED glow */
+@keyframes ledGlow {
+  0%, 100% { filter: drop-shadow(0 0 4px currentColor); }
+  50% { filter: drop-shadow(0 0 12px currentColor); }
+}
+
+.led-on {
+  animation: ledGlow 1.5s ease-in-out infinite;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #f1f5f9; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* Experiment card hover */
+.experiment-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.experiment-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 40px rgba(37, 99, 235, 0.12);
+}
+
+/* Badge shimmer */
+@keyframes badgeShimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+.badge-gold {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24, #f59e0b);
+  background-size: 200% auto;
+  animation: badgeShimmer 3s linear infinite;
+}
+
+.lab-scene { background: radial-gradient(ellipse at 50% 10%, #24354e, #101b2e 75%); }
+.lab-scene > svg { display: block; width: 100%; height: auto; }
+.lab-button { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; border: 1px solid #475569; border-radius: 0.65rem; padding: 0.6rem 0.85rem; font-size: 0.8rem; font-weight: 600; background: #1e293b; color: #f1f5f9; cursor: pointer; transition: background 150ms; }
+.lab-button:hover:not(:disabled) { background: #334155; }
+.lab-button:disabled { opacity: 0.45; cursor: not-allowed; }
+.lab-button-primary { background: #2563eb; border-color: #3b82f6; }
+.lab-button-primary:hover:not(:disabled) { background: #1d4ed8; }
+.lab-draggable { cursor: grab; outline: none; }
+.lab-draggable:active { cursor: grabbing; }
+.lab-draggable:hover, .lab-draggable:focus-visible { filter: drop-shadow(0 0 7px #60a5fa); }
+button, a, input, select, [tabindex="0"] { -webkit-tap-highlight-color: transparent; }
+:focus-visible { outline: 3px solid #60a5fa; outline-offset: 4px; }
+input[type="range"] { accent-color: #60a5fa; min-height: 28px; cursor: pointer; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
