@@ -92,6 +92,7 @@ export default function FiltrationLab() {
   return (
     <div lang="en">
       <LabWorkspace
+        experimentId="filtration"
         title="Filtration: Separate Muddy Water"
         subject="Chemistry"
         intro="Can filter paper separate an insoluble solid from water? Assemble the apparatus, pour a suspension slowly, and compare the residue with the filtrate. This experiment panel is in English."

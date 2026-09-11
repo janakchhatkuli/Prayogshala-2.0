@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useStore } from '@/lib/store';
 import { calculatePH, getFlaskColor } from '@/lib/utils';
 import LabReport from '@/components/lab/LabReport';
+import DemoAnswer from '@/components/lab/DemoAnswer';
 import PhysicalApparatus, { initialApparatus, near, mountedPosition, reservoirTip, flaskTip, secured, aligned, funnelSeated, bottlePosition, toolsClear, type ApparatusState, type Instrument, type Point } from './PhysicalApparatus';
 
 const NAOH_CONC = 0.1, HCL_VOL = 25, ENDPOINT = 25;
@@ -220,7 +221,10 @@ export default function TitrationLab() {
       <header className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
         <Link href="/lab" className="flex items-center gap-1 text-xs text-slate-300"><ChevronLeft size={14} />Back to Lab</Link>
         <div className="text-center"><h1 className="text-sm font-bold">{locale === 'ne' ? 'अम्ल-क्षार अनुमापन' : 'Acid-Base Titration'}</h1><p className="text-xs text-slate-400">HCl + NaOH → NaCl + H₂O | 25 C</p></div>
-        <button onClick={() => reset()} className={buttonClass}><RotateCcw size={13} className="mr-1 inline" />Reset</button>
+        <div className="flex items-center gap-2">
+          <DemoAnswer experimentId="titration-acid-base" />
+          <button onClick={() => reset()} className={buttonClass}><RotateCcw size={13} className="mr-1 inline" />Reset</button>
+        </div>
       </header>
       <PhysicalApparatus state={apparatus} volume={volumeML} color={getFlaskColor(pH, apparatus.indicator > 0)} flowing={isFlowing} filling={filling} bulbActive={bulbActive}
         locked={isDone || isOvershot} canFill={canFill} canBulb={!!bulbMode(apparatus)} canIndicator={canIndicator} canFlow={canFlow}

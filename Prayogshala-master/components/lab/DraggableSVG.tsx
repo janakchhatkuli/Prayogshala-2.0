@@ -5,9 +5,11 @@ import { useRef, useState, type ReactNode, type PointerEvent } from 'react';
 export type Point = { x: number; y: number };
 
 /** Coordinates stay in the parent SVG's viewBox, including on resized/touch screens. */
-export default function DraggableSVG({ x, y, label, children, onDrop, onMove, disabled = false }: {
+export default function DraggableSVG({ x, y, label, children, onDrop, onMove, onCancel, constrain, disabled = false }: {
   x: number; y: number; label: string; children: ReactNode;
-  onDrop: (point: Point) => void; onMove?: (point: Point) => void; disabled?: boolean;
+  onDrop: (point: Point) => void; onMove?: (point: Point) => void; onCancel?: () => void;
+  /** Maps a free pointer position onto the allowed path (e.g. an arc or a rail). */
+  constrain?: (point: Point) => Point; disabled?: boolean;
 }) {
   const [position, setPosition] = useState<Point | null>(null);
   const drag = useRef<{ offset: Point; position: Point } | null>(null);
@@ -30,7 +32,8 @@ export default function DraggableSVG({ x, y, label, children, onDrop, onMove, di
     onPointerMove={event => {
       if (!drag.current) return;
       const point = svgPoint(event);
-      const next = { x: point.x - drag.current.offset.x, y: point.y - drag.current.offset.y };
+      const raw = { x: point.x - drag.current.offset.x, y: point.y - drag.current.offset.y };
+      const next = constrain ? constrain(raw) : raw;
       drag.current.position = next;
       setPosition(next);
       onMove?.(next);
@@ -43,10 +46,10 @@ export default function DraggableSVG({ x, y, label, children, onDrop, onMove, di
       event.currentTarget.releasePointerCapture(event.pointerId);
       onDrop(next);
     }}
-    onPointerCancel={() => { drag.current = null; setPosition(null); }}
+    onPointerCancel={() => { drag.current = null; setPosition(null); onCancel?.(); }}
     onKeyDown={event => {
       if (disabled) return;
-      if (event.key === 'Escape') { keyboard.current = null; setPosition(null); return; }
+      if (event.key === 'Escape') { keyboard.current = null; setPosition(null); onCancel?.(); return; }
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault(); onDrop(keyboard.current ?? { x, y }); keyboard.current = null; setPosition(null); return;
       }
@@ -54,9 +57,10 @@ export default function DraggableSVG({ x, y, label, children, onDrop, onMove, di
       if (!delta) return;
       event.preventDefault();
       const previous = keyboard.current ?? { x, y };
-      const next = { x: previous.x + delta[0], y: previous.y + delta[1] };
+      const raw = { x: previous.x + delta[0], y: previous.y + delta[1] };
+      const next = constrain ? constrain(raw) : raw;
       keyboard.current = next; setPosition(next); onMove?.(next);
     }}
-    onBlur={() => { keyboard.current = null; if (!drag.current) setPosition(null); }}
+    onBlur={() => { keyboard.current = null; if (!drag.current) { setPosition(null); onCancel?.(); } }}
   >{children}</g>;
 }

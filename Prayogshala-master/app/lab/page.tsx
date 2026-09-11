@@ -5,43 +5,69 @@ import { useStore } from '@/lib/store';
 import { EXPERIMENTS, SUBJECTS, type Subject } from '@/lib/experiments';
 import { useT } from '@/hooks/useTranslation';
 import Header from '@/components/shared/Header';
+import Footer from '@/components/shared/Footer';
 import ExperimentCard from '@/components/lab/ExperimentCard';
+import { SectionLabel, SplitLines } from '@/components/shared/Reveal';
 
 export default function LabPage() {
   const t = useT();
   const completed = useStore(s => s.completedExperiments);
   const [subject, setSubject] = useState<Subject | 'all'>('all');
-  const completedCount = EXPERIMENTS.filter(exp => completed.some(result => result.experimentId === exp.id)).length;
-  const visible = EXPERIMENTS.filter(exp => subject === 'all' || exp.subject === subject);
+  const [difficulty, setDifficulty] = useState<'all' | 'beginner' | 'intermediate'>('all');
+  const completedCount = EXPERIMENTS.filter(exp => completed.some(r => r.experimentId === exp.id)).length;
+  const visible = EXPERIMENTS.filter(exp => (subject === 'all' || exp.subject === subject) && (difficulty === 'all' || exp.difficulty === difficulty));
+  const pct = Math.round((completedCount / EXPERIMENTS.length) * 100);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="flex min-h-screen flex-col bg-ink">
       <Header />
-      <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-12">
-        <div className="mb-8 flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
+      <main className="mx-auto w-full max-w-[1400px] flex-1 px-5 pb-24 pt-28 sm:px-8">
+        <div className="grid gap-8 border-b border-line pb-10 lg:grid-cols-[1fr_360px] lg:items-end">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">{t('experiments.title')}</h1>
-            <p className="mt-2 max-w-xl text-gray-500">{t('experiments.subtitle')}</p>
+            <SectionLabel>{t('labs.label')}</SectionLabel>
+            <SplitLines as="h1" text={t('experiments.title')} className="display mt-5 text-4xl text-fg sm:text-6xl" />
+            <p className="mt-5 max-w-xl text-sm leading-relaxed text-muted sm:text-base">{t('experiments.subtitle')}</p>
           </div>
-          <div className="w-full rounded-2xl border border-blue-100 bg-white p-4 sm:w-64 sm:shrink-0">
-            <p className="mb-2 text-sm font-semibold text-gray-700">{t('experiments.progress', { completed: completedCount, total: EXPERIMENTS.length })}</p>
-            <progress className="h-2 w-full accent-blue-600" value={completedCount} max={EXPERIMENTS.length} aria-label={t('dash.title')} />
+          <div className="rounded-lg border border-line bg-surface p-5">
+            <div className="flex items-baseline justify-between">
+              <span className="label text-muted">{t('experiments.progress', { completed: completedCount, total: EXPERIMENTS.length })}</span>
+              <span className="num text-2xl text-fg">{pct}<span className="text-sm text-muted">%</span></span>
+            </div>
+            <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-line" role="progressbar" aria-label={t('dash.title')} aria-valuenow={completedCount} aria-valuemin={0} aria-valuemax={EXPERIMENTS.length}>
+              <div className="h-full bg-accent transition-[width] duration-700" style={{ width: `${pct}%` }} />
+            </div>
           </div>
         </div>
-        <div role="group" aria-label={t('experiments.filter')} className="mb-4 flex flex-wrap gap-2">
-          {(['all', ...SUBJECTS] as const).map(value => {
-            const count = value === 'all' ? EXPERIMENTS.length : EXPERIMENTS.filter(exp => exp.subject === value).length;
-            return <button key={value} type="button" aria-pressed={subject === value} onClick={() => setSubject(value)}
-              className={`flex min-h-11 items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${subject === value ? 'border-blue-600 bg-blue-600 text-white shadow-sm' : 'border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:bg-blue-50'}`}>
-              {t(`subject.${value}`)}<span className={`rounded-full px-2 py-0.5 text-xs ${subject === value ? 'bg-white/20' : 'bg-gray-100'}`}>{count}</span>
-            </button>;
-          })}
+
+        <div className="flex flex-col gap-4 py-6 md:flex-row md:items-center md:justify-between">
+          <div role="group" aria-label={t('experiments.filter')} className="flex flex-wrap gap-2">
+            {(['all', ...SUBJECTS] as const).map(value => {
+              const count = value === 'all' ? EXPERIMENTS.length : EXPERIMENTS.filter(e => e.subject === value).length;
+              const active = subject === value;
+              return (
+                <button key={value} type="button" aria-pressed={active} onClick={() => setSubject(value)}
+                  className={`label inline-flex h-9 items-center gap-2 rounded-md border px-3 transition-colors ${active ? 'border-fg bg-fg text-ink' : 'border-line-2 text-fg-2 hover:border-fg-2 hover:text-fg'}`}>
+                  {t(`subject.${value}`)}<span className={`num ${active ? 'text-ink/60' : 'text-muted-2'}`}>{count}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div role="group" aria-label={t('experiments.difficulty')} className="flex gap-2">
+            {(['all', 'beginner', 'intermediate'] as const).map(value => (
+              <button key={value} type="button" aria-pressed={difficulty === value} onClick={() => setDifficulty(value)}
+                className={`label inline-flex h-9 items-center rounded-md px-3 transition-colors ${difficulty === value ? 'bg-surface-3 text-fg' : 'text-muted hover:text-fg'}`}>
+                {value === 'all' ? t('subject.all') : t(`exp.difficulty.${value}`)}
+              </button>
+            ))}
+          </div>
         </div>
-        <p role="status" className="mb-6 text-sm text-gray-500">{t('experiments.showing', { count: visible.length })}</p>
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+
+        <p role="status" className="label mb-5 text-muted-2">{t('experiments.showing', { count: visible.length })}</p>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {visible.map((exp, index) => <ExperimentCard key={exp.id} experiment={exp} index={index} />)}
         </div>
       </main>
+      <Footer />
     </div>
   );
 }

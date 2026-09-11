@@ -118,7 +118,7 @@ export default function OhmsLawLab() {
   }
 
   return (
-    <LabWorkspace title={t('ohmslaw.title')} subject="Physics"
+    <LabWorkspace experimentId="ohms-law" title={t('ohmslaw.title')} subject="Physics"
       intro="Wire a series circuit, adjust the DC supply and compare current at three voltages. The resistor and meters are ideal: heating, lead resistance and meter loading are ignored."
       equipment={['DC bench supply', 'Knife switch', 'Resistor board', 'Two digital meters', 'Four patch leads']}
       steps={['Connect four leads', 'Close switch and adjust voltage', 'Record three voltages', 'Compare I against V']}

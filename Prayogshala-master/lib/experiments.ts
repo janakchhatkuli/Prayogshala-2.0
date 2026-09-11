@@ -6,7 +6,7 @@ export type Subject = typeof SUBJECTS[number];
 interface ExperimentMetadata {
   id: string;
   subject: Subject;
-  icon: 'flask' | 'zap' | 'pendulum' | 'filter' | 'microscope' | 'droplets' | 'heart';
+  icon: 'flask' | 'zap' | 'pendulum' | 'filter' | 'microscope' | 'droplets' | 'heart' | 'spring' | 'prism' | 'electrolysis' | 'leaf';
   nameKey: MessageKey;
   descKey: MessageKey;
   gradeKey: MessageKey;
@@ -60,6 +60,30 @@ export const EXPERIMENTS = [
     id: 'frog-anatomy', subject: 'biology', icon: 'heart',
     nameKey: 'exp.frog.name', descKey: 'exp.frog.desc', gradeKey: 'exp.frog.grade', hintKey: 'exp.frog.hint',
     duration: 35, difficulty: 'intermediate', panelLanguage: 'bilingual',
+    gradient: 'from-green-500 to-green-700', subjectBg: 'bg-green-50 text-green-700',
+  },
+  {
+    id: 'hookes-law', subject: 'physics', icon: 'spring',
+    nameKey: 'exp.hooke.name', descKey: 'exp.hooke.desc', gradeKey: 'exp.hooke.grade', hintKey: 'exp.hooke.hint',
+    duration: 20, difficulty: 'beginner', panelLanguage: 'en',
+    gradient: 'from-amber-400 to-amber-600', subjectBg: 'bg-amber-50 text-amber-700',
+  },
+  {
+    id: 'refraction', subject: 'physics', icon: 'prism',
+    nameKey: 'exp.refraction.name', descKey: 'exp.refraction.desc', gradeKey: 'exp.refraction.grade', hintKey: 'exp.refraction.hint',
+    duration: 25, difficulty: 'intermediate', panelLanguage: 'en',
+    gradient: 'from-amber-400 to-amber-600', subjectBg: 'bg-amber-50 text-amber-700',
+  },
+  {
+    id: 'electrolysis', subject: 'chemistry', icon: 'electrolysis',
+    nameKey: 'exp.electrolysis.name', descKey: 'exp.electrolysis.desc', gradeKey: 'exp.electrolysis.grade', hintKey: 'exp.electrolysis.hint',
+    duration: 20, difficulty: 'beginner', panelLanguage: 'en',
+    gradient: 'from-blue-500 to-blue-700', subjectBg: 'bg-blue-50 text-blue-700',
+  },
+  {
+    id: 'photosynthesis', subject: 'biology', icon: 'leaf',
+    nameKey: 'exp.photosynthesis.name', descKey: 'exp.photosynthesis.desc', gradeKey: 'exp.photosynthesis.grade', hintKey: 'exp.photosynthesis.hint',
+    duration: 25, difficulty: 'intermediate', panelLanguage: 'en',
     gradient: 'from-green-500 to-green-700', subjectBg: 'bg-green-50 text-green-700',
   },
 ] as const satisfies readonly ExperimentMetadata[];

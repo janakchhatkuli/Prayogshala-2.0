@@ -97,7 +97,7 @@ export default function OsmosisLab() {
   }
 
   return (
-    <LabWorkspace title="Osmosis in potato tissue" subject="Biology"
+    <LabWorkspace experimentId="osmosis" title="Osmosis in potato tissue" subject="Biology"
       intro="How does sucrose concentration change potato mass? Immerse equal fresh samples, run a 60-minute model and compare at least two different baths. Water crosses cell membranes in response to differences in water potential."
       equipment={['10.00 g potato samples', 'Sucrose bath: 0.00-0.60 M', 'Model timer', 'Virtual blotting and balance']}
       steps={['Set bath and immerse sample', 'Run the 60-minute model', 'Record two distinct baths', 'Complete the comparison']}

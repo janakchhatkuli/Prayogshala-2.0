@@ -83,7 +83,7 @@ export default function MicroscopeLab() {
   }
 
   return (
-    <LabWorkspace title="Cells under the microscope" subject="Biology"
+    <LabWorkspace experimentId="microscope-cells" title="Cells under the microscope" subject="Biology"
       intro="How do plant, animal and blood cells differ? Load prepared, stained slides, bring real image blur into focus, and record two different specimens. These are authored teaching illustrations, not micrographs."
       equipment={['Compound microscope', '3 prepared slides', '40x / 100x / 400x optics', 'LED illuminator']}
       steps={['Load a prepared slide', 'Focus and illuminate the image', 'Record two different specimens', 'Complete the comparison']}

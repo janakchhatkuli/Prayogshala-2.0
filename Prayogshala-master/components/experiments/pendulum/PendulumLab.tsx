@@ -100,7 +100,7 @@ export default function PendulumLab() {
     setFeedback('Bench reset. Pull the bob aside to begin a fresh investigation.');
   }
 
-  return <div lang="en"><LabWorkspace title="Simple pendulum" subject="Physics"
+  return <div lang="en"><LabWorkspace experimentId="simple-pendulum" title="Simple pendulum" subject="Physics"
     intro="Does a longer pendulum swing more slowly? Adjust the string, release the bob and time five oscillations at two different lengths. This ideal small-angle model ignores friction and bob size; the timer records simulation time, not an independent measurement."
     equipment={['Retort stand and clamp', 'Adjustable string', 'Brass bob', 'Metre scale', 'Five-cycle model timer']}
     steps={['Set length and release bob', 'Time five oscillations', 'Record two different lengths', 'Calculate gravity']}
