@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import { Zap } from 'lucide-react';
 import LabWorkspace from '@/components/lab/LabWorkspace';
+import type { DemoStep } from '@/components/lab/useDemoRunner';
 import { useStore } from '@/lib/store';
 import { useT } from '@/hooks/useTranslation';
 
@@ -117,8 +118,23 @@ export default function OhmsLawLab() {
     setFeedback(INITIAL_FEEDBACK); setResetKey(previous => previous + 1);
   }
 
+  const readingAt = (v: number): Reading => ({ voltage: v, current: v / 100, resistance: 100 });
+  const demo: DemoStep[] = [
+    { caption: 'Lead 1: supply positive to the switch. The switch stays open while wiring.', run: () => { setRes(100); setSwitchOn(false); setWires([0]); } },
+    { caption: 'Lead 2: switch to the 100 ohm resistor.', run: () => setWires([0, 1]) },
+    { caption: 'Lead 3: resistor to the ammeter positive terminal.', run: () => setWires([0, 1, 2]) },
+    { caption: 'Lead 4: ammeter back to supply negative. The series circuit is complete.', run: () => setWires([0, 1, 2, 3]) },
+    { caption: 'Set 2 V and close the switch. The ammeter reads 20 mA.', run: () => { setVoltage(2); setSwitchOn(true); }, wait: 1800 },
+    { caption: 'Record 2 V, 20 mA.', run: () => setReadings([readingAt(2)]) },
+    { caption: 'Turn the supply to 4 V. Current doubles to 40 mA.', run: () => setVoltage(4), wait: 1600 },
+    { caption: 'Record 4 V, 40 mA.', run: () => setReadings([readingAt(2), readingAt(4)]) },
+    { caption: 'Turn to 6 V: 60 mA. Current rises in step with voltage.', run: () => setVoltage(6), wait: 1600 },
+    { caption: 'Record 6 V, 60 mA, then open the switch.', run: () => { setReadings([readingAt(2), readingAt(4), readingAt(6)]); setSwitchOn(false); } },
+    { caption: 'Plot I against V: a straight line through the origin. V / I = 100 ohm every time.', run: () => setMode('plot'), wait: 2600 },
+  ];
+
   return (
-    <LabWorkspace experimentId="ohms-law" title={t('ohmslaw.title')} subject="Physics"
+    <LabWorkspace experimentId="ohms-law" demo={demo} title={t('ohmslaw.title')} subject="Physics"
       intro="Wire a series circuit, adjust the DC supply and compare current at three voltages. The resistor and meters are ideal: heating, lead resistance and meter loading are ignored."
       equipment={['DC bench supply', 'Knife switch', 'Resistor board', 'Two digital meters', 'Four patch leads']}
       steps={['Connect four leads', 'Close switch and adjust voltage', 'Record three voltages', 'Compare I against V']}

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import LabWorkspace from '@/components/lab/LabWorkspace';
+import type { DemoStep } from '@/components/lab/useDemoRunner';
 import { useStore } from '@/lib/store';
 
 const TUBE_ML = 30;
@@ -48,12 +49,23 @@ export default function ElectrolysisLab() {
   const ratio = o2 > 0 ? h2 / o2 : 0;
   const currentStep = !filled ? 0 : !acid ? 1 : h2 < 5 ? 2 : !(tested.h2 && tested.o2) ? 3 : 4;
   const reset = () => { setFilled(false); setAcid(false); setVoltage(6); setPower(false); setH2(0); setO2(0); setSeconds(0); setTested({}); setComplete(false); setFeedback('Bench reset. Fill the tubes to begin.'); };
+  const h2Ref = useRef(h2); h2Ref.current = h2;
+
+  const demo: DemoStep[] = [
+    { caption: 'Fill both graduated tubes with water through the top reservoir.', run: () => setFilled(true) },
+    { caption: 'Connect the supply. Almost nothing happens: pure water barely conducts.', run: () => { setVoltage(6); setPower(true); }, wait: 2200 },
+    { caption: 'Add a few drops of dilute sulfuric acid. Ions now carry the current and bubbles appear at both electrodes.', run: () => setAcid(true), wait: 1800 },
+    { caption: 'Raise the voltage to 12 V. Gas collects faster; the cathode tube fills about twice as fast as the anode tube.', run: () => setVoltage(12), until: () => h2Ref.current >= 12, wait: 800 },
+    { caption: 'Switch off the supply and compare: roughly 2 volumes of gas at the cathode for every 1 at the anode.', run: () => setPower(false), wait: 1800 },
+    { caption: 'Lit splint at the cathode gas: a squeaky pop. Hydrogen.', run: () => setTested(t => ({ ...t, h2: true })), wait: 1600 },
+    { caption: 'Glowing splint at the anode gas relights. Oxygen. Water is H2O: two hydrogens for every oxygen.', run: () => setTested(t => ({ ...t, o2: true })), wait: 2000 },
+  ];
 
   const tubeFill = (ml: number) => (ml / TUBE_ML) * 150;
 
   return (
     <div lang="en">
-      <LabWorkspace experimentId="electrolysis" title="Electrolysis of water" subject="Chemistry"
+      <LabWorkspace experimentId="electrolysis" demo={demo} title="Electrolysis of water" subject="Chemistry"
         intro="What is water made of, and in what proportion? Pass a direct current through acidified water using a Hofmann-style apparatus, collect the gases above each electrode and compare their volumes. Then identify each gas with a simple test."
         equipment={['Hofmann voltameter (two graduated tubes)', 'Platinum electrodes', '6 V DC supply with control', 'Dilute sulfuric acid', 'Lit splint and glowing splint']}
         steps={['Fill tubes with water', 'Add dilute acid', 'Pass current and collect gas', 'Test both gases', 'Compare volumes']}

@@ -2,6 +2,7 @@
 
 import { useId, useState } from 'react';
 import LabWorkspace from '@/components/lab/LabWorkspace';
+import type { DemoStep } from '@/components/lab/useDemoRunner';
 import DraggableSVG, { type Point } from '@/components/lab/DraggableSVG';
 import { useStore } from '@/lib/store';
 
@@ -82,8 +83,20 @@ export default function MicroscopeLab() {
     setFeedback('Bench reset. Select and load your first prepared slide.');
   }
 
+  const demo: DemoStep[] = [
+    { caption: 'Choose the onion epidermis slide and place it on the stage.', run: () => { setSelected('plant'); setLoaded('plant'); setMagnification(100); setIllumination(65); setFocus(15); } },
+    { caption: 'Turn the coarse focus. The image sharpens as the knob reaches the right setting.', run: () => setFocus(30), wait: 700 },
+    { caption: 'Fine focus: cell walls and large vacuoles come into view.', run: () => setFocus(SLIDES.plant.focus), wait: 1800 },
+    { caption: 'Record the plant cells at 100x.', run: () => setRecords([{ specimen: 'plant', magnification: 100, illumination: 65 }]) },
+    { caption: 'Swap in the cheek epithelium slide.', run: () => { setSelected('animal'); setLoaded('animal'); setFocus(15); }, wait: 1200 },
+    { caption: 'Refocus. Irregular cells with a central nucleus and no cell wall.', run: () => setFocus(SLIDES.animal.focus), wait: 1800 },
+    { caption: 'Record the animal cells.', run: () => setRecords([{ specimen: 'plant', magnification: 100, illumination: 65 }, { specimen: 'animal', magnification: 100, illumination: 65 }]) },
+    { caption: 'Switch to 400x for the blood smear and adjust the light.', run: () => { setSelected('blood'); setLoaded('blood'); setMagnification(400); setIllumination(55); setFocus(15); }, wait: 1200 },
+    { caption: 'Focus: many red cells with no nucleus; one white cell with a lobed nucleus.', run: () => setFocus(SLIDES.blood.focus + 6), wait: 2200 },
+  ];
+
   return (
-    <LabWorkspace experimentId="microscope-cells" title="Cells under the microscope" subject="Biology"
+    <LabWorkspace experimentId="microscope-cells" demo={demo} title="Cells under the microscope" subject="Biology"
       intro="How do plant, animal and blood cells differ? Load prepared, stained slides, bring real image blur into focus, and record two different specimens. These are authored teaching illustrations, not micrographs."
       equipment={['Compound microscope', '3 prepared slides', '40x / 100x / 400x optics', 'LED illuminator']}
       steps={['Load a prepared slide', 'Focus and illuminate the image', 'Record two different specimens', 'Complete the comparison']}

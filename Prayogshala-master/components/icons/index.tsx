@@ -308,6 +308,23 @@ export function IconMenu(props: IconProps) {
   );
 }
 
+export function IconSun(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8" />
+    </svg>
+  );
+}
+
+export function IconMoon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z" />
+    </svg>
+  );
+}
+
 export const EXPERIMENT_ICON_MAP = {
   flask: IconFlask,
   zap: IconBolt,

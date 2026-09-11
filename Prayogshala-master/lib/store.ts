@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import { SUBJECTS, getExperiment } from './experiments';
 
 export type Locale = 'en' | 'ne';
+export type Theme = 'dark' | 'light';
 
 export interface UserProfile {
   name: string;
@@ -37,6 +38,9 @@ interface PrayogShalaStore {
   locale: Locale;
   setLocale: (locale: Locale) => void;
 
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
+
   currentUser: UserProfile;
   setUser: (user: UserProfile) => void;
 
@@ -62,6 +66,9 @@ export const useStore = create<PrayogShalaStore>()(
     (set, get) => ({
       locale: 'ne',
       setLocale: (locale) => set({ locale }),
+
+      theme: 'dark',
+      setTheme: (theme) => set({ theme }),
 
       currentUser: { name: '', grade: 10 },
       setUser: (user) => set({ currentUser: user }),

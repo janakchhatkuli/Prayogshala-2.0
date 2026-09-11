@@ -7,7 +7,7 @@ import { motion } from 'framer-motion';
  */
 export default function HeroScene({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 640 520" className={className} role="img" aria-label="Virtual titration bench with burette, flask and digital readouts" fill="none">
+    <svg viewBox="0 0 640 520" className={`theme-svg ${className ?? ''}`} role="img" aria-label="Virtual titration bench with burette, flask and digital readouts" fill="none">
       <defs>
         <linearGradient id="hs-glass" x1="0" x2="1">
           <stop offset="0" stopColor="#ffffff" stopOpacity=".18" />

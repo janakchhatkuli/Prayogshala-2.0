@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import LabWorkspace from '@/components/lab/LabWorkspace';
+import type { DemoStep } from '@/components/lab/useDemoRunner';
 import DraggableSVG, { type Point } from '@/components/lab/DraggableSVG';
 import { useStore } from '@/lib/store';
 
@@ -89,10 +90,22 @@ export default function FiltrationLab() {
     ? 'Pouring slowly. Brown particles stay in the paper while clear water drains into the flask.'
     : draining ? 'Pouring stopped. Water already in the filter continues draining.' : status;
 
+  const filtrateRef = useRef(volumes.filtrate); filtrateRef.current = volumes.filtrate;
+  const demo: DemoStep[] = [
+    // Demo runs never earn completion credit.
+    { caption: 'Place the glass funnel over the receiving flask.', run: () => { recorded.current = true; setFunnelPlaced(true); } },
+    { caption: 'Fold the filter paper into a cone and seat it in the funnel.', run: () => setPaperPlaced(true) },
+    { caption: 'Bring the beaker of muddy water to the pouring position.', run: () => setBeakerPlaced(true) },
+    { caption: 'Pour slowly. Mud stays on the paper; clear water passes into the flask.', run: () => setPouring(true), until: () => filtrateRef.current >= 50, wait: 400 },
+    { caption: 'Half collected. The residue is the insoluble solid; the filtrate is clear water.', until: () => filtrateRef.current >= 100, wait: 1800 },
+    { caption: 'All 100 mL filtered. Dissolved salts would still be in the filtrate: filtration removes only insoluble solids.', wait: 2000 },
+  ];
+
   return (
     <div lang="en">
       <LabWorkspace
         experimentId="filtration"
+        demo={demo}
         title="Filtration: Separate Muddy Water"
         subject="Chemistry"
         intro="Can filter paper separate an insoluble solid from water? Assemble the apparatus, pour a suspension slowly, and compare the residue with the filtrate. This experiment panel is in English."

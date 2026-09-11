@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import LabWorkspace from '@/components/lab/LabWorkspace';
 import DraggableSVG, { type Point } from '@/components/lab/DraggableSVG';
+import type { DemoStep } from '@/components/lab/useDemoRunner';
 import { useStore } from '@/lib/store';
 
 const N_GLASS = 1.5;
@@ -54,9 +55,20 @@ export default function RefractionLab() {
   const reset = () => { setIncidence(40); setPreview(null); setLampOn(false); setTrials([]); setComplete(false); setMedium('glass'); setFeedback('Bench reset. Switch on the ray box to begin.'); };
   const currentStep = !lampOn ? 0 : trials.length === 0 ? 1 : trials.length < 3 ? 2 : 3;
 
+  const rOf = (angle: number) => Number(deg(Math.asin(Math.sin(rad(angle)) / N_GLASS)).toFixed(1));
+  const demo: DemoStep[] = [
+    { caption: 'Place the glass block and switch on the ray box. A single ray hits the top face.', run: () => { setMedium('glass'); setLampOn(true); setIncidence(30); } },
+    { caption: 'Angle of incidence 30 degrees. The ray bends toward the normal: r is about 19.5 degrees.', wait: 1800 },
+    { caption: 'Record i = 30, r = 19.5.', run: () => setTrials([{ i: 30, r: rOf(30) }]) },
+    { caption: 'Swing the ray box to 45 degrees.', run: () => setIncidence(45), wait: 1800 },
+    { caption: 'Record i = 45, r = 28.1. sin i / sin r is still about 1.5.', run: () => setTrials([{ i: 30, r: rOf(30) }, { i: 45, r: rOf(45) }]) },
+    { caption: 'Swing to 60 degrees. Notice the emergent ray stays parallel to the incident ray.', run: () => setIncidence(60), wait: 1800 },
+    { caption: 'Record i = 60, r = 35.3. Mean n = 1.50: the refractive index of glass.', run: () => setTrials([{ i: 30, r: rOf(30) }, { i: 45, r: rOf(45) }, { i: 60, r: rOf(60) }]), wait: 2000 },
+  ];
+
   return (
     <div lang="en">
-      <LabWorkspace experimentId="refraction" title="Refraction through a block" subject="Physics"
+      <LabWorkspace experimentId="refraction" demo={demo} title="Refraction through a block" subject="Physics"
         intro="How does light bend when it enters a denser medium? Aim a single ray at a rectangular block, measure the angles of incidence and refraction from the normal, and test whether sin i / sin r is constant."
         equipment={['Ray box with single slit', 'Rectangular glass block', 'Rectangular water cell', 'Protractor', 'Optical pins and paper']}
         steps={['Switch on the ray box', 'Set an angle and read i and r', 'Record three angles', 'Compute refractive index']}
@@ -136,7 +148,7 @@ export default function RefractionLab() {
           {/* ray box */}
           <DraggableSVG x={lamp.x} y={lamp.y} label="Ray box; drag around the pin to change the angle of incidence" disabled={complete}
             constrain={constrain} onMove={p => setPreview(angleFrom(p))} onCancel={() => setPreview(null)}
-            onDrop={p => { setPreview(null); setIncidence(angleFrom(p)); setFeedback(`Angle of incidence set to ${angleFrom(p)} degrees.`); }}>
+            onDrop={p => { setPreview(null); setIncidence(angleFrom(p)); if (!lampOn) setLampOn(true); setFeedback(`Angle of incidence set to ${angleFrom(p)} degrees.${lampOn ? '' : ' Ray box switched on.'}`); }}>
             <g transform={`rotate(${-i})`}>
               <rect x="-26" y="-58" width="52" height="60" rx="5" fill="#27272a" stroke="#5f5f66" />
               <rect x="-4" y="-2" width="8" height="6" fill={lampOn ? '#fe5b2a' : '#3a3a3f'} />

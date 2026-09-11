@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useStore } from '@/lib/store';
 import { useT } from '@/hooks/useTranslation';
 import LanguageToggle from './LanguageToggle';
+import ThemeToggle from './ThemeToggle';
 import { LogoMark, IconMenu, IconClose, IconUser } from '@/components/icons';
 import { cn } from '@/lib/utils';
 
@@ -54,6 +55,7 @@ export default function Header({ transparent = false }: { transparent?: boolean 
         </nav>
 
         <div className="flex items-center gap-2">
+          <ThemeToggle />
           <LanguageToggle />
           {session ? (
             <Link href="/dashboard" className="label hidden h-9 items-center gap-2 rounded-md border border-line-2 px-3 text-fg-2 transition-colors hover:border-fg-2 hover:text-fg sm:inline-flex">

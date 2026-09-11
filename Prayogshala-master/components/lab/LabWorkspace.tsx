@@ -6,6 +6,8 @@ import { AnimatePresence, motion } from 'framer-motion';
 import type { ExperimentId } from '@/lib/experiments';
 import { EXPERIMENT_FACTS } from '@/lib/experimentFacts';
 import { IconArrowReturn, IconReset, IconCheck, IconPlay, IconClose } from '@/components/icons';
+import { useDemoRunner, type DemoStep } from './useDemoRunner';
+import DemoOverlay from './DemoOverlay';
 
 export interface LabWorkspaceProps {
   title: string;
@@ -22,6 +24,8 @@ export interface LabWorkspaceProps {
   onReset: () => void;
   /** Enables the "Demo answer" button, which reveals the expected result without running the bench. */
   experimentId?: ExperimentId;
+  /** Scripted walkthrough. When present, "Play demo" resets the bench and drives it step by step. */
+  demo?: DemoStep[];
 }
 
 const TONE = {
@@ -30,12 +34,14 @@ const TONE = {
   Biology: { text: 'text-biology', bg: 'bg-biology' },
 } as const;
 
-export default function LabWorkspace({ title, subject, intro, equipment, steps, currentStep, children, controls, observations, conclusion, complete, onReset, experimentId }: LabWorkspaceProps) {
+export default function LabWorkspace({ title, subject, intro, equipment, steps, currentStep, children, controls, observations, conclusion, complete, onReset, experimentId, demo }: LabWorkspaceProps) {
   const [showBrief, setShowBrief] = useState(true);
   const [showDemo, setShowDemo] = useState(false);
+  const runner = useDemoRunner(demo, { onStart: () => { setShowDemo(false); setShowBrief(false); onReset(); }, onFinish: () => setShowDemo(true) });
   const tone = TONE[subject];
   const fact = experimentId ? EXPERIMENT_FACTS[experimentId] : null;
   const progress = complete ? 100 : Math.round((currentStep / steps.length) * 100);
+  const handleReset = () => { runner.stop(); onReset(); };
 
   return (
     <div className="min-h-[calc(100dvh-64px)] bg-ink text-fg">
@@ -56,13 +62,18 @@ export default function LabWorkspace({ title, subject, intro, equipment, steps, 
               <span className="label text-muted">{complete ? 'Complete' : `Step ${Math.min(currentStep + 1, steps.length)} / ${steps.length}`}</span>
               <span className="h-1 w-28 overflow-hidden rounded-full bg-line"><span className={`block h-full ${complete ? 'bg-ok' : 'bg-accent'} transition-[width] duration-500`} style={{ width: `${progress}%` }} /></span>
             </div>
+            {demo && demo.length > 0 && (
+              <button type="button" className={`lab-button ${runner.playing ? '' : 'lab-button-primary'}`} onClick={() => (runner.playing ? runner.stop() : runner.start())} aria-pressed={runner.playing}>
+                {runner.playing ? <IconClose size={13} /> : <IconPlay size={13} />} {runner.playing ? 'Stop demo' : 'Play demo'}
+              </button>
+            )}
             {fact && (
-              <button type="button" className={`lab-button ${showDemo ? '' : 'lab-button-primary'}`} onClick={() => setShowDemo(v => !v)} aria-pressed={showDemo}>
-                {showDemo ? <IconClose size={13} /> : <IconPlay size={13} />} {showDemo ? 'Hide demo' : 'Demo answer'}
+              <button type="button" className="lab-button" onClick={() => setShowDemo(v => !v)} aria-pressed={showDemo}>
+                {showDemo ? <IconClose size={13} /> : <IconCheck size={13} />} {showDemo ? 'Hide answer' : 'Show answer'}
               </button>
             )}
             <button className="lab-button" onClick={() => setShowBrief(!showBrief)} aria-expanded={showBrief}>Briefing</button>
-            <button className="lab-button" onClick={onReset}><IconReset size={13} /> Reset</button>
+            <button className="lab-button" onClick={handleReset}><IconReset size={13} /> Reset</button>
           </div>
         </div>
       </div>
@@ -74,7 +85,7 @@ export default function LabWorkspace({ title, subject, intro, equipment, steps, 
             <motion.section initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.3 }} className="mb-5 overflow-hidden" aria-label="Demo answer">
               <div className="corner-marks grid gap-6 rounded-lg border border-accent/50 bg-accent-soft p-5 lg:grid-cols-[1fr_360px]">
                 <div>
-                  <p className="label text-accent">// Demo answer / expected result</p>
+                  <p className="label text-accent">// {demo ? 'Demo complete / expected result' : 'Expected result'}</p>
                   <p className="display mt-3 text-xl text-fg">{fact.question}</p>
                   <p className="mt-3 text-sm leading-relaxed text-fg-2">{fact.answer}</p>
                   {fact.equation && <p className="num mt-3 inline-block rounded border border-line bg-ink px-3 py-1.5 text-sm text-fg">{fact.equation}</p>}
@@ -126,8 +137,11 @@ export default function LabWorkspace({ title, subject, intro, equipment, steps, 
 
         <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
           <div className="min-w-0">
-            <section aria-label="Interactive laboratory bench" className="lab-scene corner-marks overflow-hidden rounded-lg border border-line">{children}</section>
-            <section aria-label="Equipment controls" className="mt-4 rounded-lg border border-line bg-surface p-4">{controls}</section>
+            <section aria-label="Interactive laboratory bench" className={`lab-scene theme-svg corner-marks relative overflow-hidden rounded-lg border transition-colors ${runner.playing ? 'border-accent/60' : 'border-line'}`}>
+              {children}
+              <DemoOverlay playing={runner.playing} index={runner.index} total={runner.total} caption={runner.caption} onStop={runner.stop} />
+            </section>
+            <section aria-label="Equipment controls" className={`mt-4 rounded-lg border border-line bg-surface p-4 ${runner.playing ? 'pointer-events-none opacity-60' : ''}`}>{controls}</section>
           </div>
           <aside className="space-y-4">
             <section className="rounded-lg border border-line bg-surface p-5">

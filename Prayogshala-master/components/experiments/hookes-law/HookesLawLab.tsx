@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import LabWorkspace from '@/components/lab/LabWorkspace';
 import DraggableSVG, { type Point } from '@/components/lab/DraggableSVG';
+import type { DemoStep } from '@/components/lab/useDemoRunner';
 import { useStore } from '@/lib/store';
 
 const K = 49; // N/m, spring constant of the model spring
@@ -40,7 +41,7 @@ export default function HookesLawLab() {
 
   const addMass = (g: number) => {
     if (complete) return;
-    if (!zeroed) { setFeedback('Zero the pointer first so extension is measured from the unloaded position.'); return; }
+    if (!zeroed) { setZeroed(true); setFeedback(`Pointer zeroed automatically, then ${g} g added. Total load ${loadG + g} g.`); setLoadG(v => v + g); return; }
     setLoadG(v => v + g);
     setFeedback(`${g} g added. Total load ${loadG + g} g. Read the pointer and record when it settles.`);
   };
@@ -61,6 +62,19 @@ export default function HookesLawLab() {
 
   const reset = () => { setLoadG(0); setZeroed(false); setTrials([]); setComplete(false); setFeedback('Bench reset. Zero the pointer, then load the spring.'); };
 
+  const trialFor = (massG: number): Trial => { const f = (massG / 1000) * G; return { massG, forceN: f, extensionCm: (f / K) * 100 }; };
+  const demo: DemoStep[] = [
+    { caption: 'Zero the pointer against the scale with no load.', run: () => { setZeroed(true); setLoadG(0); } },
+    { caption: 'Hang 100 g on the hanger. The spring stretches about 2 cm.', run: () => setLoadG(100) },
+    { caption: 'Record the reading: 0.98 N, 2.0 cm.', run: () => setTrials([trialFor(100)]) },
+    { caption: 'Add another 100 g. Extension doubles to 4 cm.', run: () => setLoadG(200) },
+    { caption: 'Record: 1.96 N, 4.0 cm.', run: () => setTrials([trialFor(100), trialFor(200)]) },
+    { caption: 'Add a 200 g mass. Total 400 g, extension 8 cm.', run: () => setLoadG(400) },
+    { caption: 'Record: 3.92 N, 8.0 cm. The points fall on a straight line.', run: () => setTrials([trialFor(100), trialFor(200), trialFor(400)]) },
+    { caption: 'Add 400 g more: past the elastic limit the spring stretches further than the line predicts.', run: () => setLoadG(800), wait: 2200 },
+    { caption: 'Remove the masses. The slope of F against x gives k = 49 N/m.', run: () => setLoadG(0), wait: 1800 },
+  ];
+
   const currentStep = !zeroed ? 0 : loadG === 0 && trials.length === 0 ? 1 : trials.length < 3 ? 2 : 3;
   const springTop = HOOK.y + 8;
   const springLen = 150 + extPx;
@@ -68,7 +82,7 @@ export default function HookesLawLab() {
 
   return (
     <div lang="en">
-      <LabWorkspace experimentId="hookes-law" title="Hooke's law" subject="Physics"
+      <LabWorkspace experimentId="hookes-law" demo={demo} title="Hooke's law" subject="Physics"
         intro="Is the extension of a spring proportional to the load hanging from it? Zero the pointer, add slotted masses one at a time and read the extension. Plot force against extension and find the spring constant."
         equipment={['Retort stand and clamp', 'Steel spring with pointer', 'Metre rule (cm)', 'Mass hanger', 'Slotted masses 50 g, 100 g, 200 g']}
         steps={['Zero the pointer', 'Load the hanger', 'Record three or more points', 'Find k from the graph']}
@@ -76,7 +90,7 @@ export default function HookesLawLab() {
         controls={<div className="space-y-4">
           <div className="flex flex-wrap gap-2">
             <button className="lab-button" aria-pressed={zeroed} disabled={complete || loadG > 0} onClick={() => { setZeroed(true); setFeedback('Pointer zeroed at 0.0 cm. Drag a mass onto the hanger.'); }}>{zeroed ? 'Pointer zeroed' : 'Zero pointer'}</button>
-            {MASSES.map(m => <button key={m} className="lab-button" disabled={!zeroed || complete} onClick={() => addMass(m)}>+ {m} g</button>)}
+            {MASSES.map(m => <button key={m} className="lab-button" disabled={complete} onClick={() => addMass(m)}>+ {m} g</button>)}
             <button className="lab-button" disabled={loadG === 0 || complete} onClick={removeAll}>Remove masses</button>
             <button className="lab-button" disabled={!zeroed || loadG === 0 || complete || trials.some(t => t.massG === loadG)} onClick={record}>Record reading</button>
             <button className="lab-button lab-button-primary" disabled={trials.filter(t => t.massG <= ELASTIC_LIMIT_G).length < 3 || complete} onClick={() => { save('hookes-law', fit && Math.abs(fit - K) / K < 0.05 ? 100 : 90); setComplete(true); setFeedback('Investigation saved. Compare your k with the model value.'); }}>Complete investigation</button>
@@ -143,7 +157,7 @@ export default function HookesLawLab() {
             <rect width="250" height="110" rx="6" fill="#161618" stroke="#2a2a2e" />
             <text x="12" y="20" fill="#8a8a8f" fontFamily="var(--font-jetbrains)" fontSize="10" letterSpacing="2">SLOTTED MASSES / DRAG TO HANGER</text>
             {MASSES.map((m, i) => (
-              <DraggableSVG key={m} x={45 + i * 80} y={68} label={`${m} gram mass; drag onto the hanger`} disabled={!zeroed || complete}
+              <DraggableSVG key={m} x={45 + i * 80} y={68} label={`${m} gram mass; drag onto the hanger`} disabled={complete}
                 onMove={() => setHoverMass(m)} onCancel={() => setHoverMass(null)}
                 onDrop={p => { setHoverMass(null); dropMass(m, { x: p.x + 520, y: p.y + 300 }); }}>
                 <rect x="-26" y="-12" width="52" height="24" rx="3" fill="url(#hk-brass)" stroke="#2a2a2e" />

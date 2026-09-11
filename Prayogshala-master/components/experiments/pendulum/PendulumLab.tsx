@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import LabWorkspace from '@/components/lab/LabWorkspace';
 import DraggableSVG, { type Point } from '@/components/lab/DraggableSVG';
+import type { DemoStep } from '@/components/lab/useDemoRunner';
 import { useStore } from '@/lib/store';
 
 const GRAVITY = 9.81;
@@ -100,7 +101,20 @@ export default function PendulumLab() {
     setFeedback('Bench reset. Pull the bob aside to begin a fresh investigation.');
   }
 
-  return <div lang="en"><LabWorkspace experimentId="simple-pendulum" title="Simple pendulum" subject="Physics"
+  const runningRef = useRef(running); runningRef.current = running;
+  const periodOf = (L: number) => 2 * Math.PI * Math.sqrt(L / GRAVITY);
+  const swing = (L: number) => { setLength(L); setAmplitude(15); setAngle(15); clock.current = 0; setElapsed(0); setRunning(true); };
+  const demo: DemoStep[] = [
+    { caption: 'Loosen the clamp and slide the collar to set the string to 0.50 m.', run: () => { setClampOpen(true); setLength(0.5); }, wait: 1600 },
+    { caption: 'Tighten the clamp, pull the bob 15 degrees aside and release. The timer counts five full swings.', run: () => { setClampOpen(false); swing(0.5); }, until: () => !runningRef.current, wait: 600 },
+    { caption: 'Five swings took about 7.1 s, so T = 1.42 s. Record the trial.', run: () => setTrials([{ length: 0.5, period: periodOf(0.5), time: 5 * periodOf(0.5) }]), wait: 1800 },
+    { caption: 'Double the length to 1.00 m.', run: () => { setClampOpen(true); setLength(1); }, wait: 1400 },
+    { caption: 'Release again. The bob swings visibly slower.', run: () => { setClampOpen(false); swing(1); }, until: () => !runningRef.current, wait: 600 },
+    { caption: 'Five swings took about 10.0 s, so T = 2.01 s: 1.41 times longer, not double.', run: () => setTrials([{ length: 0.5, period: periodOf(0.5), time: 5 * periodOf(0.5) }, { length: 1, period: periodOf(1), time: 5 * periodOf(1) }]), wait: 2200 },
+    { caption: 'g = 4 pi^2 L / T^2 gives 9.81 m/s^2 for both trials.', wait: 1800 },
+  ];
+
+  return <div lang="en"><LabWorkspace experimentId="simple-pendulum" demo={demo} title="Simple pendulum" subject="Physics"
     intro="Does a longer pendulum swing more slowly? Adjust the string, release the bob and time five oscillations at two different lengths. This ideal small-angle model ignores friction and bob size; the timer records simulation time, not an independent measurement."
     equipment={['Retort stand and clamp', 'Adjustable string', 'Brass bob', 'Metre scale', 'Five-cycle model timer']}
     steps={['Set length and release bob', 'Time five oscillations', 'Record two different lengths', 'Calculate gravity']}

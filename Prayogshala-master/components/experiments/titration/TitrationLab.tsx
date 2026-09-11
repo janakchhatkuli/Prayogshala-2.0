@@ -8,7 +8,8 @@ import { useStore } from '@/lib/store';
 import { calculatePH, getFlaskColor } from '@/lib/utils';
 import LabReport from '@/components/lab/LabReport';
 import DemoAnswer from '@/components/lab/DemoAnswer';
-import PhysicalApparatus, { initialApparatus, near, mountedPosition, reservoirTip, flaskTip, secured, aligned, funnelSeated, bottlePosition, toolsClear, type ApparatusState, type Instrument, type Point } from './PhysicalApparatus';
+import type { DemoStep } from '@/components/lab/useDemoRunner';
+import PhysicalApparatus, { initialApparatus, near, mountedPosition, reservoirTip, flaskTip, secured, aligned, funnelSeated, bottlePosition, toolsClear, SHELF, type ApparatusState, type Instrument, type Point } from './PhysicalApparatus';
 
 const NAOH_CONC = 0.1, HCL_VOL = 25, ENDPOINT = 25;
 const buttonClass = 'rounded-xl border border-slate-600 px-3 py-2 text-sm text-slate-100 hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-white disabled:opacity-40 disabled:cursor-not-allowed';
@@ -209,6 +210,40 @@ export default function TitrationLab() {
     setFeedback(demo ? 'Demo: colourless at pH 7. Add one drop. No completion is saved; reset for an earned attempt.' : 'Place the burette in the clamp, then tighten the clamp wheel.');
   };
   const calculatedConc = NAOH_CONC * volumeML / HCL_VOL;
+
+  // Scripted walkthrough: mutates the same refs/state the pointer handlers use, so the bench animates for real.
+  const place = (id: Instrument, p: Point, extra: Partial<ApparatusState> = {}) => {
+    const a = apparatusRef.current;
+    update({ ...a, ...extra, positions: { ...a.positions, [id]: p } });
+  };
+  const demoSteps: DemoStep[] = [
+    { caption: 'Lift the burette from the shelf and seat it in the clamp.', run: () => { setIsDemo(true); place('burette', mountedPosition(apparatusRef.current), { mounted: true, tension: 0 }); } },
+    { caption: 'Turn the clamp wheel to 80 %: the burette is now secure and vertical.', run: () => update({ ...apparatusRef.current, tension: 80 }) },
+    { caption: 'Seat the funnel in the top of the burette.', run: () => place('funnel', apparatusRef.current.positions.burette) },
+    { caption: 'Bring the NaOH bottle over the funnel.', run: () => place('bottle', bottlePosition(apparatusRef.current)) },
+    { caption: 'Pour 0.1 mol/L NaOH until the meniscus sits on the 0.00 mL mark.', run: () => { fillingRef.current = true; setFilling(true); }, until: () => apparatusRef.current.fill >= 50, wait: 600 },
+    { caption: 'Return the bottle and funnel so nothing drips into the flask later.', run: () => { place('bottle', SHELF.bottle); place('funnel', SHELF.funnel); } },
+    { caption: 'Lower the pipette tip into the HCl reservoir.', run: () => place('pipette', reservoirTip) },
+    { caption: 'Squeeze the bulb: draw up exactly 25.0 mL of acid.', run: () => { bulbUntil.current = Infinity; setBulbActive(true); }, until: () => apparatusRef.current.pipette >= 25, wait: 500 },
+    { caption: 'Carry the full pipette to the conical flask.', run: () => { bulbUntil.current = 0; setBulbActive(false); place('pipette', flaskTip(apparatusRef.current)); } },
+    { caption: 'Release the bulb and let all 25 mL drain into the flask.', run: () => { bulbUntil.current = Infinity; setBulbActive(true); }, until: () => apparatusRef.current.acid >= 25, wait: 500 },
+    { caption: 'Return the pipette to its holder.', run: () => { bulbUntil.current = 0; setBulbActive(false); place('pipette', SHELF.pipette); } },
+    { caption: 'Position the phenolphthalein dropper over the flask and add two drops. The acid stays colourless.', run: () => { place('dropper', flaskTip(apparatusRef.current)); update({ ...apparatusRef.current, indicator: 2 }); setPHCurve([{ volume: 0, pH: calculatePH(0) }]); }, wait: 1800 },
+    { caption: 'Return the dropper and slide the flask under the burette tip.', run: () => { place('dropper', SHELF.dropper); place('flask', { x: 410, y: 350 }); } },
+    { caption: 'Open the stopcock. NaOH runs in and pH creeps upward while the solution stays colourless.', run: () => update({ ...apparatusRef.current, opening: 70 }), until: () => volumeRef.current >= 22, wait: 200 },
+    { caption: 'Near 25 mL: close the stopcock and switch to single drops.', run: () => update({ ...apparatusRef.current, opening: 15 }), until: () => volumeRef.current >= 24.6, wait: 300 },
+    { caption: 'Drop by drop. Watch for the first pink that persists on swirling.', run: () => update({ ...apparatusRef.current, opening: 0 }), wait: 800 },
+    { caption: 'Single drops, swirling between each. Still colourless: pH just below 7.', run: () => {
+      const drip = () => {
+        if (lockedRef.current || calculatePH(volumeRef.current) >= 8.2) return;
+        if (apparatusRef.current.opening === 0) singleDrop();
+        setTimeout(drip, 700);
+      };
+      drip();
+    }, until: () => calculatePH(volumeRef.current) >= 8.2, wait: 1600 },
+    { caption: 'Pale pink holds: the indicator has crossed pH 8.2. This is the endpoint.', wait: 1600 },
+    { caption: 'Read the burette: about 25.05 mL. M1V1 = M2V2 gives [HCl] = 0.100 mol/L.', run: markEndpoint, wait: 2400 },
+  ];
   const blocker = !secured(apparatus) ? 'Burette must be clamped at 70% tension or more.'
     : apparatus.fill < 50 ? 'Fill the burette through the funnel to 50 mL.'
     : apparatus.acid < 25 ? 'Transfer the full 25 mL aliquot using the pipette bulb.'
@@ -222,7 +257,7 @@ export default function TitrationLab() {
         <Link href="/lab" className="flex items-center gap-1 text-xs text-slate-300"><ChevronLeft size={14} />Back to Lab</Link>
         <div className="text-center"><h1 className="text-sm font-bold">{locale === 'ne' ? 'अम्ल-क्षार अनुमापन' : 'Acid-Base Titration'}</h1><p className="text-xs text-slate-400">HCl + NaOH → NaCl + H₂O | 25 C</p></div>
         <div className="flex items-center gap-2">
-          <DemoAnswer experimentId="titration-acid-base" />
+          <DemoAnswer experimentId="titration-acid-base" steps={demoSteps} onStart={() => reset(false)} />
           <button onClick={() => reset()} className={buttonClass}><RotateCcw size={13} className="mr-1 inline" />Reset</button>
         </div>
       </header>
@@ -234,7 +269,7 @@ export default function TitrationLab() {
           <button className={buttonClass} disabled={!canFlow || apparatus.opening > 0} onClick={singleDrop}>{locale === 'ne' ? 'एक थोपा (+0.05 mL)' : 'Single drop (+0.05 mL)'}</button>
           <button className={`${buttonClass} bg-pink-800`} disabled={!canFlow || apparatus.opening > 0 || pH < 8.2} onClick={markEndpoint}>Mark Endpoint</button>
           {isDone && !isDemo && <button className={`${buttonClass} bg-emerald-800`} onClick={() => setShowReport(true)}><FileText size={14} className="mr-1 inline" />Generate Lab Report</button>}
-          <button onClick={() => reset(true)} className={`${buttonClass} ml-auto`}>Demo</button>
+          <button onClick={() => reset(true)} className={`${buttonClass} ml-auto`}>Skip to endpoint</button>
         </div>
         <p role="status" data-testid="titration-feedback" className="text-sm text-blue-200">{feedback}</p>
         {blocker && !isDone && !isOvershot && <p data-testid="flow-blocker" className="text-xs text-amber-200">Flow locked: {blocker}</p>}
@@ -250,10 +285,10 @@ export default function TitrationLab() {
         <div><dt className="text-xs text-slate-400">Burette remaining</dt><dd data-testid="burette-remaining">{(apparatus.fill - volumeML).toFixed(2)} mL</dd></div>
         <div><dt className="text-xs text-slate-400">Room temperature</dt><dd>25 C</dd></div>
       </dl>
-      <section className="space-y-2 rounded-xl border border-violet-500/30 bg-violet-950/30 p-3">
-        <h2 className="text-sm font-semibold text-violet-200">{currentStep + 1}. {locale === 'ne' ? guide.ne : guide.en}</h2>
+      <section className="space-y-2 rounded-xl border border-accent/40 bg-accent-soft p-3">
+        <h2 className="text-sm font-semibold text-fg">{currentStep + 1}. {locale === 'ne' ? guide.ne : guide.en}</h2>
         <p className="text-xs leading-relaxed text-slate-300">{guide.text}</p>
-        <button className="flex w-full items-center justify-between py-2 text-xs text-violet-300" aria-expanded={showWhy} onClick={() => setShowWhy(v => !v)}>Why do we do this? {showWhy ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>
+        <button className="flex w-full items-center justify-between py-2 text-xs text-accent" aria-expanded={showWhy} onClick={() => setShowWhy(v => !v)}>Why do we do this? {showWhy ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>
         {showWhy && <p className="text-xs leading-relaxed text-slate-400">{guide.why}</p>}
       </section>
       <section aria-label="pH versus volume chart">

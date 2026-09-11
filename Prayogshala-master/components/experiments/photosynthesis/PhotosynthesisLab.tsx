@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import LabWorkspace from '@/components/lab/LabWorkspace';
 import DraggableSVG, { type Point } from '@/components/lab/DraggableSVG';
+import type { DemoStep } from '@/components/lab/useDemoRunner';
 import { useStore } from '@/lib/store';
 
 const RAIL = { x0: 120, x1: 520, y: 330 }; // lamp slides along this rail
@@ -73,15 +74,29 @@ export default function PhotosynthesisLab() {
     setFeedback('Recorded. Choose a different distance and count again.');
     setElapsed(0); setBubbles(0); bubbleAcc.current = 0;
   };
-  const moveLamp = (d: number) => { if (counting || complete) return; setDistance(d); setElapsed(0); setBubbles(0); bubbleAcc.current = 0; setFeedback(`Lamp at ${d} cm. Start a one-minute count.`); };
+  const moveLamp = (d: number) => { if (complete) return; if (counting) { setCounting(false); } setDistance(d); setElapsed(0); setBubbles(0); bubbleAcc.current = 0; setFeedback(`Lamp at ${d} cm. Start a one-minute count.`); };
   const reset = () => { setDistance(20); setPreview(null); setLampOn(false); setCo2(false); setCounting(false); setElapsed(0); setBubbles(0); setTrials([]); setComplete(false); bubbleAcc.current = 0; setFeedback('Bench reset.'); };
 
   const currentStep = !co2 ? 0 : !lampOn ? 1 : trials.length === 0 ? 2 : trials.length < 3 ? 3 : 4;
   const bubbleCount = Math.min(10, Math.round(rate / 4));
 
+  const countFor = (d: number) => Math.round(rateFor(d, true));
+  const showCount = (d: number) => { setDistance(d); setElapsed(1); setBubbles(countFor(d)); bubbleAcc.current = countFor(d); };
+  const demo: DemoStep[] = [
+    { caption: 'Dissolve sodium hydrogencarbonate so the pondweed has plenty of carbon dioxide.', run: () => setCo2(true) },
+    { caption: 'Switch on the lamp at 40 cm. Only a few bubbles per minute.', run: () => { setLampOn(true); setDistance(40); setElapsed(0); setBubbles(0); }, wait: 2000 },
+    { caption: 'Count for one minute: about 3 bubbles.', run: () => showCount(40) },
+    { caption: 'Record and move the lamp to 20 cm. Intensity is four times higher.', run: () => { setTrials([{ distance: 40, bubbles: countFor(40) }]); setDistance(20); setElapsed(0); setBubbles(0); }, wait: 2000 },
+    { caption: 'Count again: about 11 bubbles per minute.', run: () => showCount(20) },
+    { caption: 'Record and move to 10 cm.', run: () => { setTrials([{ distance: 40, bubbles: countFor(40) }, { distance: 20, bubbles: countFor(20) }]); setDistance(10); setElapsed(0); setBubbles(0); }, wait: 2000 },
+    { caption: 'About 25 bubbles per minute. Rate rose steeply, then starts to level off.', run: () => showCount(10) },
+    { caption: 'Record and try 5 cm: the curve flattens. Light is no longer the limiting factor; CO2 is.', run: () => { setTrials([{ distance: 40, bubbles: countFor(40) }, { distance: 20, bubbles: countFor(20) }, { distance: 10, bubbles: countFor(10) }]); showCount(5); }, wait: 2400 },
+    { caption: 'Four points plotted: rate against distance follows an inverse-square rise to a plateau.', run: () => setTrials([{ distance: 40, bubbles: countFor(40) }, { distance: 20, bubbles: countFor(20) }, { distance: 10, bubbles: countFor(10) }, { distance: 5, bubbles: countFor(5) }]), wait: 1800 },
+  ];
+
   return (
     <div lang="en">
-      <LabWorkspace experimentId="photosynthesis" title="Rate of photosynthesis" subject="Biology"
+      <LabWorkspace experimentId="photosynthesis" demo={demo} title="Rate of photosynthesis" subject="Biology"
         intro="How does light intensity affect how fast a plant photosynthesises? Count oxygen bubbles from a piece of pondweed while a lamp sits at different distances. Decide what limits the rate when the light is very bright."
         equipment={['Elodea (pondweed) in a boiling tube', 'Beaker of water as heat shield', 'Bench lamp on a rail', 'Metre rule', 'Sodium hydrogencarbonate', 'Stopwatch']}
         steps={['Add NaHCO3 for CO2', 'Switch on lamp', 'Count bubbles for 1 minute', 'Record three distances', 'Plot rate vs distance']}
@@ -89,7 +104,7 @@ export default function PhotosynthesisLab() {
         controls={<div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="text-sm text-fg-2">Lamp distance <strong className="num float-right text-biology">{shownDistance} cm</strong>
-              <input aria-label="Lamp distance" type="range" min="5" max="50" step="1" value={distance} disabled={counting || complete} onChange={e => moveLamp(Number(e.target.value))} className="mt-2 w-full" /></label>
+              <input aria-label="Lamp distance" type="range" min="5" max="50" step="1" value={distance} disabled={complete} onChange={e => moveLamp(Number(e.target.value))} className="mt-2 w-full" /></label>
             <div className="flex flex-wrap items-end gap-2">
               <button className="lab-button" aria-pressed={co2} disabled={co2 || complete} onClick={() => { setCo2(true); setFeedback('NaHCO3 dissolved: carbon dioxide supply is no longer the first limit. Switch on the lamp.'); }}>{co2 ? 'NaHCO3 added' : 'Add NaHCO3'}</button>
               <button className="lab-button" aria-pressed={lampOn} disabled={counting || complete} onClick={() => { setLampOn(v => !v); setFeedback(lampOn ? 'Lamp off.' : 'Lamp on. Slide it along the rail, then count.'); }}>{lampOn ? 'Lamp on' : 'Switch on lamp'}</button>
@@ -149,7 +164,7 @@ export default function PhotosynthesisLab() {
           ))}
           <text x={BEAKER_X} y="150" textAnchor="middle" fontSize="9" fill="#8a8a8f" fontFamily="var(--font-jetbrains)" letterSpacing="1.5">ELODEA</text>
           {/* lamp */}
-          <DraggableSVG x={lampX} y={RAIL.y} label="Bench lamp; drag along the rail to change distance" disabled={counting || complete}
+          <DraggableSVG x={lampX} y={RAIL.y} label="Bench lamp; drag along the rail to change distance" disabled={complete}
             constrain={constrain} onMove={p => setPreview(distanceFrom(p))} onCancel={() => setPreview(null)}
             onDrop={p => { setPreview(null); moveLamp(distanceFrom(p)); }}>
             <rect x="-30" y="16" width="60" height="14" rx="3" fill="#3a3a3f" />
