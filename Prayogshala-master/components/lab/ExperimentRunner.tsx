@@ -6,8 +6,8 @@ import { useT } from '@/hooks/useTranslation';
 
 function LoadingExperiment() {
   const t = useT();
-  return <div role="status" className="mx-auto flex min-h-80 max-w-7xl items-center justify-center gap-3 px-4 text-gray-600">
-    <span aria-hidden="true" className="h-5 w-5 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600 motion-reduce:animate-none" />
+  return <div role="status" className="mx-auto flex min-h-80 max-w-7xl items-center justify-center gap-3 px-4 label text-muted">
+    <span aria-hidden="true" className="h-2 w-2 bg-accent blink" />
     {t('loading')}
   </div>;
 }
@@ -20,6 +20,10 @@ const LABS = {
   'microscope-cells': dynamic(() => import('@/components/experiments/microscope/MicroscopeLab'), { ssr: false, loading: LoadingExperiment }),
   osmosis: dynamic(() => import('@/components/experiments/osmosis/OsmosisLab'), { ssr: false, loading: LoadingExperiment }),
   'frog-anatomy': dynamic(() => import('@/components/experiments/frog-anatomy/FrogAnatomyLab'), { ssr: false, loading: LoadingExperiment }),
+  'hookes-law': dynamic(() => import('@/components/experiments/hookes-law/HookesLawLab'), { ssr: false, loading: LoadingExperiment }),
+  refraction: dynamic(() => import('@/components/experiments/refraction/RefractionLab'), { ssr: false, loading: LoadingExperiment }),
+  electrolysis: dynamic(() => import('@/components/experiments/electrolysis/ElectrolysisLab'), { ssr: false, loading: LoadingExperiment }),
+  photosynthesis: dynamic(() => import('@/components/experiments/photosynthesis/PhotosynthesisLab'), { ssr: false, loading: LoadingExperiment }),
 } satisfies Record<ExperimentId, ComponentType>;
 
 interface Props {

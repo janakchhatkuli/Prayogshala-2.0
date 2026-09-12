@@ -60,9 +60,23 @@ interface Props {
 
 const buttonClass = 'rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-xs text-slate-100 hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-white disabled:opacity-40 disabled:cursor-not-allowed';
 
+// Invisible grab zones so the whole instrument (not just filled strokes) can be dragged.
+const HIT: Record<Instrument, { x: number; y: number; w: number; h: number }> = {
+  clamp: { x: -60, y: -30, w: 115, h: 60 },
+  burette: { x: -18, y: -16, w: 36, h: 266 },
+  flask: { x: -56, y: -4, w: 112, h: 104 },
+  funnel: { x: -30, y: -34, w: 60, h: 40 },
+  bottle: { x: -66, y: -4, w: 70, h: 95 },
+  dropper: { x: -18, y: -78, w: 36, h: 82 },
+  pipette: { x: -22, y: -152, w: 44, h: 156 },
+};
+const HANDOFF_PX = 8;
+
 export default function PhysicalApparatus({ state: a, volume, color, flowing, filling, bulbActive, locked, canFill, canBulb, canIndicator, canFlow, onMove, onWheel, onFill, onBulb, onIndicator }: Props) {
   const svg = useRef<SVGSVGElement>(null);
   const drag = useRef<{ id: Instrument; pointer: number; offset: Point; point: Point } | null>(null);
+  // Pointer that started on a wheel or bulb; becomes an instrument drag once it moves far enough.
+  const pending = useRef<{ id: Instrument; pointer: number; clientX: number; clientY: number; onHandOff?: () => void } | null>(null);
   const wheelHandler = useRef(onWheel);
   wheelHandler.current = onWheel;
 
@@ -93,8 +107,25 @@ export default function PhysicalApparatus({ state: a, volume, color, flowing, fi
     const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
     return { x: point.x, y: point.y };
   };
+  const beginPending = (id: Instrument, event: PointerEvent<SVGElement>, onHandOff?: () => void) => {
+    if (locked) return;
+    pending.current = { id, pointer: event.pointerId, clientX: event.clientX, clientY: event.clientY, onHandOff };
+  };
+  // Child controls call this on pointermove; once the pointer travels, the parent instrument starts dragging.
+  const maybeHandOff = (event: PointerEvent<SVGElement>) => {
+    const p = pending.current;
+    if (!p || p.pointer !== event.pointerId) return;
+    if (Math.hypot(event.clientX - p.clientX, event.clientY - p.clientY) < HANDOFF_PX) return;
+    pending.current = null;
+    p.onHandOff?.();
+    const point = coordinates(event);
+    if (!point) return;
+    const pos = a.positions[p.id];
+    drag.current = { id: p.id, pointer: event.pointerId, offset: { x: point.x - pos.x, y: point.y - pos.y }, point: pos };
+  };
   const movable = (id: Instrument, label: string, children: ReactNode) => {
     const p = a.positions[id];
+    const hit = HIT[id];
     return <g key={id} data-testid={`instrument-${id}`} role="group" aria-label={label} tabIndex={0}
       transform={`translate(${p.x} ${p.y})`} style={{ touchAction: 'none', cursor: locked ? 'default' : 'grab' }}
       onPointerDown={event => {
@@ -113,13 +144,14 @@ export default function PhysicalApparatus({ state: a, volume, color, flowing, fi
         onMove(id, active.point, false);
       }}
       onPointerUp={event => {
+        pending.current = null;
         if (drag.current?.id !== id || drag.current.pointer !== event.pointerId) return;
         onMove(id, drag.current.point, true);
         drag.current = null;
-        event.currentTarget.releasePointerCapture(event.pointerId);
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
       }}
-      onPointerCancel={() => { drag.current = null; }}
-      onLostPointerCapture={() => { drag.current = null; }}
+      onPointerCancel={() => { drag.current = null; pending.current = null; }}
+      onLostPointerCapture={event => { if (event.target === event.currentTarget) drag.current = null; }}
       onKeyDown={event => {
         const delta: Record<string, Point> = { ArrowLeft: { x: -10, y: 0 }, ArrowRight: { x: 10, y: 0 }, ArrowUp: { x: 0, y: -10 }, ArrowDown: { x: 0, y: 10 } };
         if (!delta[event.key]) return;
@@ -127,13 +159,16 @@ export default function PhysicalApparatus({ state: a, volume, color, flowing, fi
         // Arrow nudges must be able to leave a snap zone; placement buttons snap explicitly.
         onMove(id, { x: p.x + delta[event.key].x, y: p.y + delta[event.key].y }, false);
       }}>
-      <title>{label}: drag or use arrow keys and placement buttons below</title>{children}
+      <title>{label}: drag or use arrow keys and placement buttons below</title>
+      <rect x={hit.x} y={hit.y} width={hit.w} height={hit.h} fill="transparent" />
+      {children}
     </g>;
   };
   const wheel = (id: 'tension' | 'opening', x: number, y: number, label: string, value: number) => <g
     data-testid={`${id}-wheel`} data-wheel={id} role="slider" tabIndex={0}
     aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={value} aria-valuetext={`${value} percent, ${value * 2.7} degrees`}
-    onPointerDown={e => e.stopPropagation()}
+    onPointerDown={e => { e.stopPropagation(); beginPending(id === 'tension' ? 'clamp' : 'burette', e); }}
+    onPointerMove={maybeHandOff}
     onKeyDown={e => { if (['ArrowUp', 'ArrowRight', 'ArrowDown', 'ArrowLeft'].includes(e.key)) { e.preventDefault(); e.stopPropagation(); onWheel(id, ['ArrowUp', 'ArrowRight'].includes(e.key) ? 10 : -10); } }}
     style={{ cursor: 'ns-resize' }}>
     <circle cx={x} cy={y} r={23} fill="transparent" />
@@ -150,7 +185,7 @@ export default function PhysicalApparatus({ state: a, volume, color, flowing, fi
   const busy = locked || filling || bulbActive;
 
   return <section aria-label="Physical titration apparatus" className="min-w-0">
-    <svg ref={svg} viewBox="0 0 800 500" className="block h-auto w-full" aria-label="Titration bench at 25 C" data-testid="titration-bench">
+    <svg ref={svg} viewBox="0 0 800 500" className="theme-svg block h-auto w-full" aria-label="Titration bench at 25 C" data-testid="titration-bench">
       <defs>
         <linearGradient id="titration-glass"><stop stopColor="#dbeafe" stopOpacity=".4" /><stop offset=".5" stopColor="#93c5fd" stopOpacity=".06" /><stop offset="1" stopColor="#60a5fa" stopOpacity=".3" /></linearGradient>
         <clipPath id="physical-flask-liquid"><path d="M-10 25 L-52 86 Q0 96 52 86 L10 25Z" /></clipPath>
@@ -225,8 +260,9 @@ export default function PhysicalApparatus({ state: a, volume, color, flowing, fi
         <path d="M-9 -102H9" stroke="#fef08a" />
         <text data-testid="pipette-volume" x="18" y="-60" fill="#e2e8f0" fontSize="12">{a.pipette.toFixed(1)} / 25 mL</text>
         <g data-testid="pipette-bulb" data-wheel="bulb" role="button" tabIndex={0} aria-label="Pipette bulb: hold to aspirate or dispense" aria-disabled={!canBulb}
-          onPointerDown={e => { e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); onBulb('hold'); }}
-          onPointerUp={() => onBulb('release')} onPointerCancel={() => onBulb('release')} onLostPointerCapture={() => onBulb('release')}
+          onPointerDown={e => { e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); beginPending('pipette', e, () => onBulb('release')); onBulb('hold'); }}
+          onPointerMove={maybeHandOff}
+          onPointerUp={() => { pending.current = null; onBulb('release'); }} onPointerCancel={() => onBulb('release')} onLostPointerCapture={() => onBulb('release')}
           onKeyDown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); if (!e.repeat) onBulb('hold'); } }}
           onKeyUp={e => { if (e.key === ' ' || e.key === 'Enter') onBulb('release'); }} onBlur={() => onBulb('release')}>
           <ellipse cy="-127" rx={bulbActive ? 12 : 17} ry="22" fill={bulbActive ? '#f97316' : '#ea580c'} stroke="#fdba74" strokeWidth="2" />

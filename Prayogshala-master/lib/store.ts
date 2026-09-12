@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import { SUBJECTS, getExperiment } from './experiments';
 
 export type Locale = 'en' | 'ne';
+export type Theme = 'dark' | 'light';
 
 export interface UserProfile {
   name: string;
@@ -16,12 +17,39 @@ export interface ExperimentResult {
   endpointAccuracy?: number;
 }
 
+export interface Session {
+  email: string;
+  name: string;
+  role: 'student' | 'teacher';
+  grade: number;
+  school: string;
+  loggedInAt: string;
+}
+
+export interface ViewEvent {
+  path: string;
+  at: string;
+  experimentId?: string;
+}
+
+const VIEW_LOG_LIMIT = 200;
+
 interface PrayogShalaStore {
   locale: Locale;
   setLocale: (locale: Locale) => void;
 
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
+
   currentUser: UserProfile;
   setUser: (user: UserProfile) => void;
+
+  session: Session | null;
+  login: (session: Omit<Session, 'loggedInAt'>) => void;
+  logout: () => void;
+
+  viewLog: ViewEvent[];
+  logView: (path: string, experimentId?: string) => void;
 
   completedExperiments: ExperimentResult[];
   streak: number;
@@ -39,8 +67,29 @@ export const useStore = create<PrayogShalaStore>()(
       locale: 'ne',
       setLocale: (locale) => set({ locale }),
 
+      theme: 'dark',
+      setTheme: (theme) => set({ theme }),
+
       currentUser: { name: '', grade: 10 },
       setUser: (user) => set({ currentUser: user }),
+
+      session: null,
+      login: (session) =>
+        set({
+          session: { ...session, loggedInAt: new Date().toISOString() },
+          currentUser: { name: session.name, grade: session.grade },
+        }),
+      logout: () => set({ session: null }),
+
+      viewLog: [],
+      logView: (path, experimentId) => {
+        const { viewLog } = get();
+        const last = viewLog[viewLog.length - 1];
+        // Collapse rapid duplicate hits on the same route (e.g. re-renders, back/forward).
+        if (last && last.path === path && Date.now() - new Date(last.at).getTime() < 5000) return;
+        const next = [...viewLog, { path, at: new Date().toISOString(), experimentId }];
+        set({ viewLog: next.slice(-VIEW_LOG_LIMIT) });
+      },
 
       completedExperiments: [],
       streak: 0,

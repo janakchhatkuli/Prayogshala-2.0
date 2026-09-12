@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, HelpCircle, X, Pin, Scissors, MousePointer2, Search, Check } from 'lucide-react';
 import Link from 'next/link';
+import DemoAnswer from '@/components/lab/DemoAnswer';
 import { useStore } from '@/lib/store';
 import { useT } from '@/hooks/useTranslation';
 import DraggableSVG, { type Point } from '@/components/lab/DraggableSVG';
@@ -512,9 +513,12 @@ export default function FrogAnatomyLab() {
           <p className="text-gray-400 text-xs mt-1">
             Finish the procedure, then use the probe to study all seven organs in exploration mode to complete this lab.
           </p>
-          <button onClick={resetLab} className="mt-3 rounded-xl bg-gray-800 px-3 py-2 text-xs hover:bg-gray-700">
-            {locale === 'ne' ? 'फेरि सुरु गर्नुहोस्' : 'Reset lab'}
-          </button>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <DemoAnswer experimentId="frog-anatomy" />
+            <button onClick={resetLab} className="lab-button">
+              {locale === 'ne' ? 'फेरि सुरु गर्नुहोस्' : 'Reset lab'}
+            </button>
+          </div>
         </div>
 
         <div className="p-4 space-y-4 flex-1">

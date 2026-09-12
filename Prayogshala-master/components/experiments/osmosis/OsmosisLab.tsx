@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import LabWorkspace from '@/components/lab/LabWorkspace';
+import type { DemoStep } from '@/components/lab/useDemoRunner';
 import DraggableSVG, { type Point } from '@/components/lab/DraggableSVG';
 import { useStore } from '@/lib/store';
 
@@ -66,6 +67,17 @@ export default function OsmosisLab() {
     setFeedback('Bench and notebook reset. Begin with a fresh sample.');
   }
 
+  const phaseRef = useRef(phase); phaseRef.current = phase;
+  const trialFor = (c: number) => { const ch = 60 * (INTERNAL - c) * (1 - Math.exp(-DURATION / 18)); return { concentration: c, mass: INITIAL_MASS * (1 + ch / 100), change: ch }; };
+  const demo: DemoStep[] = [
+    { caption: 'Set the bath to distilled water (0 M) and drop in a fresh 10.00 g potato cylinder.', run: () => { freshTrial(0); setLoaded(true); } },
+    { caption: 'Run the 60-minute model. Water moves into the cells; the cylinder swells and gains mass.', run: () => { setElapsed(0); setPhase('running'); }, until: () => phaseRef.current === 'finished', wait: 800 },
+    { caption: 'Blot and weigh: about +16 %. Record the trial.', run: () => setTrials([trialFor(0)]), wait: 1800 },
+    { caption: 'Fresh sample into 0.6 M salt solution, well above the cell sap concentration.', run: () => { freshTrial(0.6); setLoaded(true); }, wait: 1400 },
+    { caption: 'Run again. Now water leaves the cells; the cylinder shrinks and goes soft.', run: () => { setElapsed(0); setPhase('running'); }, until: () => phaseRef.current === 'finished', wait: 800 },
+    { caption: 'About -16 %. Water always moves toward the higher solute concentration.', run: () => setTrials([trialFor(0), trialFor(0.6)]), wait: 2200 },
+  ];
+
   function place(point: Point) {
     if (phase !== 'ready') return;
     if (point.x >= 202 && point.x <= 384 && point.y >= 162 && point.y <= 303) {
@@ -97,7 +109,7 @@ export default function OsmosisLab() {
   }
 
   return (
-    <LabWorkspace title="Osmosis in potato tissue" subject="Biology"
+    <LabWorkspace experimentId="osmosis" demo={demo} title="Osmosis in potato tissue" subject="Biology"
       intro="How does sucrose concentration change potato mass? Immerse equal fresh samples, run a 60-minute model and compare at least two different baths. Water crosses cell membranes in response to differences in water potential."
       equipment={['10.00 g potato samples', 'Sucrose bath: 0.00-0.60 M', 'Model timer', 'Virtual blotting and balance']}
       steps={['Set bath and immerse sample', 'Run the 60-minute model', 'Record two distinct baths', 'Complete the comparison']}
