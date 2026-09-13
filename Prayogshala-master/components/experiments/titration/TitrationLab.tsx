@@ -49,7 +49,7 @@ export default function TitrationLab() {
   const ready = (a: ApparatusState) => secured(a) && aligned(a) && a.fill === 50 && a.acid === 25 && a.indicator === 2 && toolsClear(a);
   const canFlow = ready(apparatus) && !isDone && !isOvershot;
   const isFlowing = canFlow && apparatus.opening > 0;
-  const canFill = !filling && !isDone && !isOvershot && secured(apparatus) && apparatus.opening === 0 && funnelSeated(apparatus) && near(apparatus.positions.bottle, bottlePosition(apparatus), 15) && apparatus.fill < 50;
+  const canFill = !filling && !isDone && !isOvershot && secured(apparatus) && apparatus.opening === 0 && funnelSeated(apparatus) && apparatus.fill < 50;
   const bulbMode = (a: ApparatusState) => {
     if (lockedRef.current || fillingRef.current || a.fill !== 50 || a.opening > 0) return null;
     if (!a.aliquotLoaded && near(a.positions.pipette, reservoirTip, 18)) return 'aspirate';
@@ -72,7 +72,7 @@ export default function TitrationLab() {
     const positions = { ...a.positions };
     let mounted = a.mounted;
     let tension = a.tension;
-    const p = { x: Math.max(40, Math.min(755, point.x)), y: Math.max(40, Math.min(425, point.y)) };
+    const p = { x: Math.max(40, Math.min(755, point.x)), y: Math.max(20, Math.min(425, point.y)) };
     if (id === 'clamp') {
       p.x = 450; p.y = Math.max(140, Math.min(165, point.y));
       if (mounted) {
@@ -97,12 +97,20 @@ export default function TitrationLab() {
     if (id === 'funnel' && snap && secured(a) && near(p, positions.burette, 35)) Object.assign(p, positions.burette);
     if (id === 'bottle') {
       p.x = Math.max(65, p.x);
-      if (snap && funnelSeated(a) && near(p, bottlePosition(a), 35)) Object.assign(p, bottlePosition(a));
+      if (snap && funnelSeated(a) && near(p, bottlePosition(a), 70)) {
+        Object.assign(p, bottlePosition(a));
+        if (secured(a) && a.fill < 50) {
+          fillingRef.current = true;
+          setFilling(true);
+          setFeedback('Pouring NaOH through the seated funnel. Filling stops automatically at the 0.00 mL mark.');
+        }
+      }
     }
     positions[id] = p;
     singleDropRef.current = false;
+    const startingFill = id === 'bottle' && snap && funnelSeated(a) && near(p, bottlePosition(a), 70) && secured(a) && a.fill < 50;
     update({ ...a, positions, mounted, tension, opening: 0 });
-    if (snap) setFeedback(`${id[0].toUpperCase() + id.slice(1)} positioned. ${a.opening > 0 ? 'Stopcock closed for safety.' : 'Follow the next setup instruction.'}`);
+    if (snap && !startingFill) setFeedback(`${id[0].toUpperCase() + id.slice(1)} positioned. ${a.opening > 0 ? 'Stopcock closed for safety.' : 'Follow the next setup instruction.'}`);
   };
 
   const turnWheel = (id: 'tension' | 'opening', delta: number) => {
@@ -124,7 +132,7 @@ export default function TitrationLab() {
 
   const startFill = () => {
     const a = apparatusRef.current;
-    if (!canFill || !secured(a) || !funnelSeated(a) || !near(a.positions.bottle, bottlePosition(a), 15)) return;
+    if (!canFill || !secured(a) || !funnelSeated(a)) return;
     fillingRef.current = true; setFilling(true);
     setFeedback('Pouring NaOH through the seated funnel. Filling stops automatically at the 0.00 mL mark.');
   };

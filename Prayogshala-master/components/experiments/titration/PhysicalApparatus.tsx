@@ -28,7 +28,7 @@ export const reservoirTip = { x: 110, y: 385 };
 export const flaskTip = (a: ApparatusState): Point => ({ x: a.positions.flask.x, y: 365 });
 export const secured = (a: ApparatusState) => a.mounted && a.tension >= 70;
 export const aligned = (a: ApparatusState) => Math.abs(a.positions.flask.x - 410) <= 12;
-export const funnelSeated = (a: ApparatusState) => a.mounted && near(a.positions.funnel, a.positions.burette, 10);
+export const funnelSeated = (a: ApparatusState) => a.mounted && near(a.positions.funnel, a.positions.burette, 30);
 export const bottlePosition = (a: ApparatusState): Point => ({ x: a.positions.burette.x, y: a.positions.burette.y - 30 });
 export const toolsClear = (a: ApparatusState) => !near(a.positions.funnel, a.positions.burette, 45) && !near(a.positions.bottle, bottlePosition(a), 45) && !near(a.positions.pipette, flaskTip(a), 35) && !near(a.positions.dropper, flaskTip(a), 35);
 export function initialApparatus(demo = false): ApparatusState {
@@ -66,7 +66,7 @@ const HIT: Record<Instrument, { x: number; y: number; w: number; h: number }> = 
   burette: { x: -18, y: -16, w: 36, h: 266 },
   flask: { x: -56, y: -4, w: 112, h: 104 },
   funnel: { x: -30, y: -34, w: 60, h: 40 },
-  bottle: { x: -66, y: -4, w: 70, h: 95 },
+  bottle: { x: -80, y: -10, w: 100, h: 110 },
   dropper: { x: -18, y: -78, w: 36, h: 82 },
   pipette: { x: -22, y: -152, w: 44, h: 156 },
 };
