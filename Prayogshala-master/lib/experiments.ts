@@ -86,6 +86,12 @@ export const EXPERIMENTS = [
     duration: 25, difficulty: 'intermediate', panelLanguage: 'en',
     gradient: 'from-green-500 to-green-700', subjectBg: 'bg-green-50 text-green-700',
   },
+  {
+    id: 'human-body', subject: 'biology', icon: 'heart',
+    nameKey: 'exp.humanBody.name', descKey: 'exp.humanBody.desc', gradeKey: 'exp.humanBody.grade', hintKey: 'exp.humanBody.hint',
+    duration: 30, difficulty: 'intermediate', panelLanguage: 'en',
+    gradient: 'from-red-500 to-red-700', subjectBg: 'bg-green-50 text-green-700',
+  },
 ] as const satisfies readonly ExperimentMetadata[];
 
 export type Experiment = typeof EXPERIMENTS[number];

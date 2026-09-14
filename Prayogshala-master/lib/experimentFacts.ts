@@ -83,4 +83,10 @@ export const EXPERIMENT_FACTS: Record<ExperimentId, ExperimentFact> = {
     readouts: [{ label: '10 cm', value: '38 bubbles/min' }, { label: '30 cm', value: '9 bubbles/min' }, { label: 'Limiting', value: 'CO2 at high light' }],
     steps: ['Set lamp distance', 'Add NaHCO3', 'Count bubbles 1 min', 'Repeat distances', 'Plot rate vs distance'],
   },
+  'human-body': {
+    question: 'What anatomical structures can be identified in the 3D model?',
+    answer: 'The model includes structures from the body surface, skeleton, muscular, and nervous systems. Select structures to see their names.',
+    readouts: [{ label: 'Systems', value: '4' }, { label: 'Structures', value: 'Loaded from GLB' }],
+    steps: ['Switch system', 'Click structure', 'Read name', 'Observe relations'],
+  },
 };

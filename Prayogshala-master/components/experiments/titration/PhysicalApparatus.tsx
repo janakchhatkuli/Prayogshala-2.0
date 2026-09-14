@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, type PointerEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 
 export type Point = { x: number; y: number };
 export type Instrument = 'burette' | 'clamp' | 'flask' | 'pipette' | 'funnel' | 'bottle' | 'dropper';
@@ -14,6 +14,12 @@ export interface ApparatusState {
   aliquotLoaded: boolean;
   acid: number;
   indicator: number;
+}
+
+export interface BuretteZoomState {
+  isZoomed: boolean;
+  zoomLevel: number;
+  panOffset: { x: number; y: number };
 }
 
 // All positions, hit tests and drag bounds use the same 800 x 500 SVG coordinates.
@@ -56,6 +62,9 @@ interface Props {
   onFill: () => void;
   onBulb: (action: 'hold' | 'release' | 'pulse') => void;
   onIndicator: () => void;
+  buretteZoom: BuretteZoomState;
+  onBuretteZoomChange: (zoom: Partial<BuretteZoomState>) => void;
+  showVolumeReading: boolean;
 }
 
 const buttonClass = 'rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-xs text-slate-100 hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-white disabled:opacity-40 disabled:cursor-not-allowed';
@@ -72,13 +81,73 @@ const HIT: Record<Instrument, { x: number; y: number; w: number; h: number }> = 
 };
 const HANDOFF_PX = 8;
 
-export default function PhysicalApparatus({ state: a, volume, color, flowing, filling, bulbActive, locked, canFill, canBulb, canIndicator, canFlow, onMove, onWheel, onFill, onBulb, onIndicator }: Props) {
+export default function PhysicalApparatus({ state: a, volume, color, flowing, filling, bulbActive, locked, canFill, canBulb, canIndicator, canFlow, onMove, onWheel, onFill, onBulb, onIndicator, buretteZoom, onBuretteZoomChange, showVolumeReading }: Props) {
   const svg = useRef<SVGSVGElement>(null);
   const drag = useRef<{ id: Instrument; pointer: number; offset: Point; point: Point } | null>(null);
-  // Pointer that started on a wheel or bulb; becomes an instrument drag once it moves far enough.
   const pending = useRef<{ id: Instrument; pointer: number; clientX: number; clientY: number; onHandOff?: () => void } | null>(null);
   const wheelHandler = useRef(onWheel);
   wheelHandler.current = onWheel;
+  const [isDraggingZoom, setIsDraggingZoom] = useState(false);
+  const dragStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+
+  const handleBuretteClick = () => {
+    if (!buretteZoom.isZoomed) {
+      onBuretteZoomChange({ isZoomed: true, zoomLevel: 3, panOffset: { x: 0, y: 0 } });
+    }
+  };
+
+  const handleZoomWheel = (e: React.WheelEvent<SVGSVGElement>) => {
+    if (!buretteZoom.isZoomed) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const zoomDelta = e.deltaY < 0 ? 0.2 : -0.2;
+    const newZoom = Math.max(1, Math.min(8, buretteZoom.zoomLevel + zoomDelta));
+    onBuretteZoomChange({ zoomLevel: newZoom });
+  };
+
+  const handleZoomMouseDown = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!buretteZoom.isZoomed) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingZoom(true);
+    dragStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      panX: buretteZoom.panOffset.x,
+      panY: buretteZoom.panOffset.y
+    };
+  };
+
+  const handleZoomMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!isDraggingZoom || !buretteZoom.isZoomed) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const dx = (e.clientX - dragStartRef.current.x) / buretteZoom.zoomLevel;
+    const dy = (e.clientY - dragStartRef.current.y) / buretteZoom.zoomLevel;
+    onBuretteZoomChange({
+      panOffset: {
+        x: dragStartRef.current.panX + dx,
+        y: dragStartRef.current.panY + dy
+      }
+    });
+  };
+
+  const handleZoomMouseUp = () => {
+    setIsDraggingZoom(false);
+  };
+
+  const handleZoomDoubleClick = () => {
+    if (buretteZoom.isZoomed) {
+      onBuretteZoomChange({ isZoomed: false, zoomLevel: 1, panOffset: { x: 0, y: 0 } });
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<SVGSVGElement>) => {
+    if (!buretteZoom.isZoomed) return;
+    if (e.key === 'Escape') {
+      onBuretteZoomChange({ isZoomed: false, zoomLevel: 1, panOffset: { x: 0, y: 0 } });
+    }
+  };
 
   useEffect(() => {
     const element = svg.current;
@@ -185,7 +254,21 @@ export default function PhysicalApparatus({ state: a, volume, color, flowing, fi
   const busy = locked || filling || bulbActive;
 
   return <section aria-label="Physical titration apparatus" className="min-w-0">
-    <svg ref={svg} viewBox="0 0 800 500" className="theme-svg block h-auto w-full" aria-label="Titration bench at 25 C" data-testid="titration-bench">
+    <svg
+      ref={svg}
+      viewBox="0 0 800 500"
+      className="theme-svg block h-auto w-full"
+      aria-label="Titration bench at 25 C"
+      data-testid="titration-bench"
+      onWheel={handleZoomWheel}
+      onMouseDown={handleZoomMouseDown}
+      onMouseMove={handleZoomMouseMove}
+      onMouseUp={handleZoomMouseUp}
+      onMouseLeave={handleZoomMouseUp}
+      onDoubleClick={handleZoomDoubleClick}
+      onKeyDown={handleKeyDown}
+      tabIndex={0}
+    >
       <defs>
         <linearGradient id="titration-glass"><stop stopColor="#dbeafe" stopOpacity=".4" /><stop offset=".5" stopColor="#93c5fd" stopOpacity=".06" /><stop offset="1" stopColor="#60a5fa" stopOpacity=".3" /></linearGradient>
         <clipPath id="physical-flask-liquid"><path d="M-10 25 L-52 86 Q0 96 52 86 L10 25Z" /></clipPath>
@@ -217,12 +300,46 @@ export default function PhysicalApparatus({ state: a, volume, color, flowing, fi
       </>)}
       {movable('burette', 'Burette', <>
         <rect x="-14" width="28" height="212" rx="4" fill="url(#titration-glass)" stroke="#93c5fd" strokeWidth="2" />
-        {a.fill > volume && <rect data-testid="burette-liquid" x="-11" y={meniscus} width="22" height={Math.max(0, 209 - meniscus)} fill="#60a5fa" opacity=".65" />}
-        {a.fill > 0 && <path data-testid="meniscus" d={`M-11 ${meniscus}Q0 ${meniscus + 3} 11 ${meniscus}`} stroke="#fef08a" fill="none" strokeWidth="2" />}
-        {Array.from({ length: 11 }, (_, i) => <g key={i}><path d={`M14 ${6 + i * 20}h9`} stroke="#cbd5e1" /><text x="26" y={10 + i * 20} fill="#94a3b8" fontSize="9">{i * 5}</text></g>)}
+        {a.fill > volume && (
+          <>
+            <rect data-testid="burette-liquid" x="-11" y={meniscus} width="22" height={Math.max(0, 209 - meniscus)} fill="#60a5fa" opacity=".65" />
+            <path data-testid="meniscus" d={`M-11 ${meniscus} Q0 ${meniscus - 2.5} 11 ${meniscus}`} stroke="#fef08a" fill="none" strokeWidth="2.5" />
+            <path d={`M-11 ${meniscus + 0.5} Q0 ${meniscus - 2} 11 ${meniscus + 0.5}`} stroke="#93c5fd" fill="none" strokeWidth="1" opacity="0.5" />
+          </>
+        )}
+        {showVolumeReading && a.fill > 0 && (
+          <text x="-30" y={meniscus + 4} fill="#fef08a" fontSize="10" fontWeight="bold" textAnchor="end">
+            {showVolumeReading ? (a.fill - volume).toFixed(2) : '??.??'} mL
+          </text>
+        )}
+        <defs>
+          <clipPath id="burette-scale-clip"><rect x="-14" y="4" width="28" height="212" /></clipPath>
+        </defs>
+        <g clipPath="url(#burette-scale-clip)">
+          {Array.from({ length: 501 }, (_, i) => {
+            const vol = i * 0.1;
+            const y = 6 + (1 - vol / 50) * 200;
+            const isMajor = vol % 1 === 0;
+            const isMid = vol % 0.5 === 0 && vol % 1 !== 0;
+            const isMajor5 = vol % 5 === 0;
+            if (y < 4 || y > 214) return null;
+            return (
+              <g key={i}>
+                <path d={`M10 ${y}h${isMajor ? 5 : isMid ? 3 : 2}`} stroke="#94a3b8" strokeWidth={isMajor ? 1.8 : isMid ? 1.2 : 0.8} opacity={isMajor ? 1 : isMid ? 0.8 : 0.5} />
+                {isMajor5 && <text x="8" y={y + 3} fill="#e2e8f0" fontSize={9} fontFamily="monospace" fontWeight="bold" textAnchor="end">{vol.toFixed(0)}</text>}
+              </g>
+            );
+          })}
+        </g>
         <path d="M-11 212L0 245L11 212" fill="url(#titration-glass)" stroke="#93c5fd" />
         {wheel('opening', 0, 221, 'Stopcock opening', a.opening)}
         <text x="-28" y="-10" fill="#cbd5e1" fontSize="11">50 mL burette</text>
+        {!buretteZoom.isZoomed && a.fill > 0 && (
+          <g onClick={handleBuretteClick} style={{ cursor: 'zoom-in' }}>
+            <rect x="-20" y="6" width="50" height="206" fill="transparent" />
+            <text x="5" y="230" fill="#60a5fa" fontSize="10" textAnchor="middle">Click to zoom</text>
+          </g>
+        )}
       </>)}
       {flowing && <circle cx={burette.x} cy={burette.y + 250} r="3" fill="#93c5fd"><animate attributeName="cy" from={burette.y + 247} to="365" dur="0.35s" repeatCount="indefinite" /></circle>}
       {movable('flask', 'Conical flask', <>
@@ -271,6 +388,108 @@ export default function PhysicalApparatus({ state: a, volume, color, flowing, fi
       </>)}
       {bulbActive && near(pipette, flaskTip(a)) && <circle cx={flask.x} cy="377" r="3" fill="#93c5fd" />}
     </svg>
+
+    {buretteZoom.isZoomed && (
+      <div className="relative mt-4" role="dialog" aria-label="Burette zoom view" aria-modal="true">
+        <div className="absolute top-2 right-2 z-10 flex gap-1">
+          <button
+            onClick={() => onBuretteZoomChange({ zoomLevel: Math.min(8, buretteZoom.zoomLevel + 0.5) })}
+            className={buttonClass}
+            aria-label="Zoom in"
+            disabled={buretteZoom.zoomLevel >= 8}
+          >
+            +
+          </button>
+          <button
+            onClick={() => onBuretteZoomChange({ zoomLevel: Math.max(1, buretteZoom.zoomLevel - 0.5) })}
+            className={buttonClass}
+            aria-label="Zoom out"
+            disabled={buretteZoom.zoomLevel <= 1}
+          >
+            -
+          </button>
+          <button
+            onClick={() => onBuretteZoomChange({ isZoomed: false, zoomLevel: 1, panOffset: { x: 0, y: 0 } })}
+            className={buttonClass}
+            aria-label="Close zoom view"
+          >
+            ✕
+          </button>
+        </div>
+        <p className="text-center text-xs text-slate-400 mb-2">Scroll to zoom | Drag to pan | Double-click or Esc to close</p>
+        <svg
+          viewBox="0 0 800 500"
+          className="theme-svg block h-auto w-full border border-slate-600 rounded-lg"
+          style={{
+            transform: `translate(${buretteZoom.panOffset.x}px, ${buretteZoom.panOffset.y}px) scale(${buretteZoom.zoomLevel})`,
+            transformOrigin: 'center center',
+            cursor: isDraggingZoom ? 'grabbing' : 'grab'
+          }}
+          onWheel={handleZoomWheel}
+          onMouseDown={handleZoomMouseDown}
+          onMouseMove={handleZoomMouseMove}
+          onMouseUp={handleZoomMouseUp}
+          onMouseLeave={handleZoomMouseUp}
+          onDoubleClick={handleZoomDoubleClick}
+          onKeyDown={handleKeyDown}
+          tabIndex={0}
+          aria-label="Zoomed burette view"
+        >
+          <defs>
+            <linearGradient id="titration-glass-zoom"><stop stopColor="#dbeafe" stopOpacity=".4" /><stop offset=".5" stopColor="#93c5fd" stopOpacity=".06" /><stop offset="1" stopColor="#60a5fa" stopOpacity=".3" /></linearGradient>
+            <clipPath id="burette-scale-clip-zoom"><rect x="-14" y="4" width="28" height="212" /></clipPath>
+          </defs>
+          <rect width="800" height="500" fill="#050a12" />
+          <g transform={`translate(${a.positions.burette.x} ${a.positions.burette.y})`}>
+            <rect x="-14" width="28" height="212" rx="4" fill="url(#titration-glass-zoom)" stroke="#93c5fd" strokeWidth="2" />
+            {a.fill > volume && (
+              <>
+                <rect data-testid="burette-liquid-zoom" x="-11" y={meniscus} width="22" height={Math.max(0, 209 - meniscus)} fill="#60a5fa" opacity=".7" />
+                <path data-testid="meniscus-zoom" d={`M-11 ${meniscus} Q0 ${meniscus - 3} 11 ${meniscus}`} stroke="#fef08a" fill="none" strokeWidth="3" />
+                <path d={`M-11 ${meniscus + 0.5} Q0 ${meniscus - 2.5} 11 ${meniscus + 0.5}`} stroke="#93c5fd" fill="none" strokeWidth="1.5" opacity="0.6" />
+              </>
+            )}
+            <g clipPath="url(#burette-scale-clip-zoom)">
+              {Array.from({ length: 501 }, (_, i) => {
+                const vol = i * 0.1;
+                const y = 6 + (1 - vol / 50) * 200;
+                const isMajor = vol % 1 === 0;
+                const isMid = vol % 0.5 === 0 && vol % 1 !== 0;
+                const zoom = buretteZoom.zoomLevel;
+                const showMinor = zoom >= 2;
+                const showMidLabels = zoom >= 3;
+                const showMajorLabels = zoom >= 1.5;
+                const showMajorTicks = isMajor || (isMid && zoom >= 1) || (showMinor && !isMajor && !isMid);
+                if (y < 4 || y > 214) return null;
+                const tickLen = isMajor ? 6 : isMid ? 4 : 2;
+                const tickWidth = isMajor ? 2.2 : isMid ? 1.5 : 1;
+                const tickOpacity = isMajor ? 1 : isMid ? 0.9 : 0.6;
+                return (
+                  <g key={i}>
+                    {showMajorTicks && <path d={`M10 ${y}h${tickLen}`} stroke="#cbd5e1" strokeWidth={tickWidth} opacity={tickOpacity} />}
+                    {isMajor && showMajorLabels && <text x="8" y={y + 4} fill="#f8fafc" fontSize={12} fontFamily="monospace" fontWeight="bold" textAnchor="end">{vol.toFixed(0)}</text>}
+                    {isMid && showMidLabels && !isMajor && <text x="8" y={y + 4} fill="#cbd5e1" fontSize={10} fontFamily="monospace" textAnchor="end">{vol.toFixed(1)}</text>}
+                  </g>
+                );
+              })}
+            </g>
+            <path d="M-11 212L0 245L11 212" fill="url(#titration-glass-zoom)" stroke="#93c5fd" />
+            <g transform={`rotate(${a.opening * 2.7} 0 221)`}>
+              <circle cx={0} cy={221} r={16} fill={a.opening > 0 ? '#059669' : '#334155'} stroke="#cbd5e1" strokeWidth={3} />
+              <path d="M0 208V234 M-13 221H13" stroke="#e2e8f0" strokeWidth={3} />
+              <circle cx={0} cy={209} r={3} fill="#fbbf24" />
+            </g>
+            {showVolumeReading && a.fill > 0 && (
+              <text x="-35" y={meniscus + 5} fill="#fef08a" fontSize="14" fontWeight="bold" fontFamily="monospace" textAnchor="end">
+                {(a.fill - volume).toFixed(2)} mL
+              </text>
+            )}
+          </g>
+          <text x="400" y="30" fill="#60a5fa" fontSize="16" textAnchor="middle" fontWeight="bold">BURETTE ZOOM VIEW</text>
+          <text x="400" y="480" fill="#94a3b8" fontSize="11" textAnchor="middle">Read the meniscus bottom against the scale. Major marks: 1 mL, Mid marks: 0.5 mL, Minor marks: 0.1 mL</text>
+        </svg>
+      </div>
+    )}
 
     <div className="grid gap-3 border-t border-white/10 bg-slate-900 p-3 text-xs sm:grid-cols-2 xl:grid-cols-3" aria-label="Equipment panel">
       <fieldset className="space-y-2"><legend className="mb-2 font-semibold text-blue-200">1. Stand, clamp and burette</legend>

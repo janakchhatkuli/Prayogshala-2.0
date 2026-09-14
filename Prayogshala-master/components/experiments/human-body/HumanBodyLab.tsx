@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useStore } from '@/lib/store';
-import { REGIONS, SYSTEM_INFO, SYSTEMS, type System } from './anatomy';
-import type { BodyScene, CameraCommand } from './scene';
+import { SYSTEM_INFO, SYSTEMS, type System } from './anatomy';
+import type { BodyScene, CameraCommand, StructureInfo } from './scene';
 import styles from './human-body.module.css';
 
 const CAMERA_BUTTONS: { command: CameraCommand; label: string }[] = [
@@ -27,8 +27,22 @@ export default function HumanBodyLab() {
   const [visited, setVisited] = useState<System[]>([]);
   const [observed, setObserved] = useState<Partial<Record<System, string>>>({});
   const [note, setNote] = useState('');
+  const [structures, setStructures] = useState<Record<System, StructureInfo[]>>({
+    body: [], skeleton: [], muscles: [], nervous: [],
+  });
   const completeExperiment = useStore(state => state.completeExperiment);
   const completed = useStore(state => state.completedExperiments.some(result => result.experimentId === 'human-body'));
+
+  const refreshStructures = useCallback(() => {
+    if (!scene.current) return;
+    const newStructures: Record<System, StructureInfo[]> = {
+      body: [], skeleton: [], muscles: [], nervous: [],
+    };
+    SYSTEMS.forEach(sys => {
+      newStructures[sys] = scene.current!.getStructures(sys);
+    });
+    setStructures(newStructures);
+  }, []);
 
   function selectRegion(value: System, id: string) {
     setSelected(id);
@@ -39,7 +53,6 @@ export default function HumanBodyLab() {
   useEffect(() => {
     let cancelled = false;
     let active: BodyScene | null = null;
-    // Three.js and OrbitControls are fetched only when this client lab mounts.
     import('./scene').then(({ createBodyScene }) => {
       if (cancelled || !host.current || !label.current) return;
       active = createBodyScene(host.current, label.current, (value, id) => {
@@ -55,9 +68,10 @@ export default function HumanBodyLab() {
       scene.current = active;
       setStatus('ready');
       setVisited(previous => previous.includes('body') ? previous : [...previous, 'body']);
+      setTimeout(refreshStructures, 100);
     }).catch(() => {
       if (cancelled) return;
-      setError('The 3D viewer could not start. It requires WebGL 2 and graphics acceleration in a supported browser. Check your browser graphics settings, or try another device. No substitute image is being shown.');
+      setError('The 3D viewer could not start. It requires WebGL 2 and graphics acceleration in a supported browser. Check your browser graphics settings, or try another device.');
       setStatus('error');
     });
     return () => {
@@ -65,16 +79,18 @@ export default function HumanBodyLab() {
       active?.dispose();
       scene.current = null;
     };
-  }, [attempt]);
+  }, [attempt, refreshStructures]);
 
   function switchSystem(value: System) {
     setSystem(value);
     setSelected(null);
     scene.current?.setSystem(value);
     if (status === 'ready') setVisited(previous => previous.includes(value) ? previous : [...previous, value]);
+    setTimeout(refreshStructures, 50);
   }
 
-  const region = REGIONS[system].find(item => item.id === selected);
+  const currentStructures = structures[system] || [];
+  const region = currentStructures.find(item => item.id === selected);
   const inspectedCount = Object.keys(observed).length;
 
   return (
@@ -87,7 +103,7 @@ export default function HumanBodyLab() {
           </div>
           <span className={styles.language}>English-language panel</span>
         </header>
-        <p className={styles.intro}>How do support, movement and communication fit together? Orbit a human figure and compare four anatomical views.</p>
+        <p className={styles.intro}>Explore a real anatomical 3D model. Switch between body systems and select structures to learn their names.</p>
         <div className={styles.grid}>
           <section className={styles.viewer} aria-label="Human anatomy explorer">
             <div role="tablist" aria-label="Anatomical systems" className={styles.tabs}>
@@ -104,8 +120,8 @@ export default function HumanBodyLab() {
               <div className={styles.stage}>
                 <div ref={host} className={styles.canvasHost} />
                 <div ref={label} hidden aria-hidden="true" className={styles.anatomicalLabel} />
-                {status === 'ready' && <><div className={styles.stageCaption}>3D / {SYSTEM_INFO[system].label}<small>Anterior = front · Posterior = back</small></div><span className={styles.schematic}>Schematic, not medical reference</span></>}
-                {status === 'loading' && <div className={styles.notice} role="status"><strong>Preparing the 3D model</strong><p>Loading the local procedural anatomy viewer...</p></div>}
+                {status === 'ready' && <><div className={styles.stageCaption}>3D / {SYSTEM_INFO[system].label}<small>Anterior = front · Posterior = back</small></div><span className={styles.schematic}>Anatomical model from open dataset</span></>}
+                {status === 'loading' && <div className={styles.notice} role="status"><strong>Loading anatomical model</strong><p>Fetching GLB model and preparing 3D scene...</p></div>}
                 {status === 'error' && <div className={styles.notice} role="alert"><strong>3D graphics unavailable</strong><p>{error}</p><button className="lab-button" onClick={() => { setStatus('loading'); setSystem('body'); setSelected(null); setAttempt(value => value + 1); }}>Retry 3D viewer</button></div>}
               </div>
               <div className={styles.viewSummary}><span className={styles.swatch} style={{ backgroundColor: SYSTEM_INFO[system].color }} /><p>{SYSTEM_INFO[system].summary}</p></div>
@@ -119,24 +135,24 @@ export default function HumanBodyLab() {
 
           <aside className={styles.sidebar}>
             <section className={styles.card}>
-              <p className={styles.eyebrow}>01 / Identify</p><h2>Anatomical regions</h2>
+              <p className={styles.eyebrow}>01 / Identify</p><h2>Anatomical structures</h2>
               <p className={styles.hint}>Click a structure in 3D or choose a name below. Left and right always mean the person&apos;s own sides, not yours.</p>
-              <div className={styles.regions}>{REGIONS[system].map(item => <button key={item.id} aria-pressed={selected === item.id} disabled={status !== 'ready'} onClick={() => selectRegion(system, item.id)}>{item.name}</button>)}</div>
-              <div className={styles.fact} aria-live="polite" aria-atomic="true"><h3>{region?.name ?? 'Choose a region'}</h3><p>{region?.fact ?? 'Your selected structure will highlight in blue-green. The floating label marks its approximate location, including structures on the far side.'}</p></div>
+              <div className={styles.regions}>{currentStructures.map(item => <button key={item.id} aria-pressed={selected === item.id} disabled={status !== 'ready'} onClick={() => selectRegion(system, item.id)}>{item.name}</button>)}</div>
+              <div className={styles.fact} aria-live="polite" aria-atomic="true"><h3>{region?.name ?? 'Choose a structure'}</h3><p>{region ? 'Selected structure highlighted in cyan. The floating label marks its location.' : 'Your selected structure will highlight in blue-green. The floating label marks its approximate location.'}</p></div>
             </section>
             <section className={styles.card}>
               <p className={styles.eyebrow}>02 / Observe</p><h2>Observation notebook</h2>
-              <p className={styles.hint} aria-live="polite">{visited.length} of 4 views visited · {inspectedCount} of 4 views inspected</p>
-              <ul className={styles.notebook}>{SYSTEMS.map(value => <li key={value}><span>{SYSTEM_INFO[value].label}</span><span>{observed[value] ? REGIONS[value].find(item => item.id === observed[value])?.name : visited.includes(value) ? 'Select a region' : 'Not visited'}</span></li>)}</ul>
+              <p className={styles.hint} aria-live="polite">{visited.length} of 4 systems visited · {inspectedCount} structures inspected</p>
+              <ul className={styles.notebook}>{SYSTEMS.map(value => <li key={value}><span>{SYSTEM_INFO[value].label}</span><span>{observed[value] ? currentStructures.find(item => item.id === observed[value])?.name : visited.includes(value) ? 'Select a structure' : 'Not visited'}</span></li>)}</ul>
               <label className={styles.noteLabel} htmlFor="human-body-note">What connects the systems?</label>
               <textarea id="human-body-note" value={note} onChange={event => setNote(event.target.value)} maxLength={1000} rows={3} placeholder="Compare a limb's bones, muscles and nerves..." />
-              <p className={styles.hint}>Notes stay in this session. Inspect at least one region in every view to record exploration.</p>
+              <p className={styles.hint}>Notes stay in this session. Inspect at least one structure in every system to record exploration.</p>
               <button className="lab-button lab-button-primary" disabled={inspectedCount < 4 || completed || status !== 'ready'} onClick={() => completeExperiment('human-body', 100)}>{completed ? 'Exploration recorded' : 'Record exploration'}</button>
               <p className={styles.hint} role="status">{completed ? 'Completion is saved in this browser. This is exploration credit, not a medical assessment.' : 'Recording completion is optional.'}</p>
             </section>
           </aside>
         </div>
-        <footer className={styles.footer}><strong>Reading this model</strong><p>A procedural, low-poly teaching model with representative anatomy. Proportions, bone shapes, muscle attachments and nerve paths are simplified; many small structures and all internal organs are omitted. Faint surfaces provide position only. It is not suitable for diagnosis or clinical training.</p></footer>
+        <footer className={styles.footer}><strong>About this model</strong><p>Real anatomical geometry loaded from a GLB file. Structures are organized by anatomical system. This is an educational visualization, not a medical reference.</p></footer>
       </div>
     </div>
   );

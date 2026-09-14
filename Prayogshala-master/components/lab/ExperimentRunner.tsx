@@ -24,6 +24,7 @@ const LABS = {
   refraction: dynamic(() => import('@/components/experiments/refraction/RefractionLab'), { ssr: false, loading: LoadingExperiment }),
   electrolysis: dynamic(() => import('@/components/experiments/electrolysis/ElectrolysisLab'), { ssr: false, loading: LoadingExperiment }),
   photosynthesis: dynamic(() => import('@/components/experiments/photosynthesis/PhotosynthesisLab'), { ssr: false, loading: LoadingExperiment }),
+  'human-body': dynamic(() => import('@/components/experiments/human-body/HumanBodyLab'), { ssr: false, loading: LoadingExperiment }),
 } satisfies Record<ExperimentId, ComponentType>;
 
 interface Props {

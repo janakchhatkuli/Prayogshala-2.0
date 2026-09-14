@@ -240,6 +240,11 @@
   "exp.photosynthesis.grade": "Grade 10-11",
   "exp.photosynthesis.hint": "Slide the lamp along the rail and count bubbles for one minute at each distance.",
 
+  "exp.humanBody.name": "Human Body Anatomy",
+  "exp.humanBody.desc": "Explore layered 3D human anatomy with interactive systems, search, and animations",
+  "exp.humanBody.grade": "Grade 10-12",
+  "exp.humanBody.hint": "Switch layers, select structures, and watch system animations.",
+
   "step": "Step",
   "of": "of",
   "hint.prefix": "Hint: ",

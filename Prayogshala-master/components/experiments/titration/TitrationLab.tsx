@@ -9,7 +9,7 @@ import { calculatePH, getFlaskColor } from '@/lib/utils';
 import LabReport from '@/components/lab/LabReport';
 import DemoAnswer from '@/components/lab/DemoAnswer';
 import type { DemoStep } from '@/components/lab/useDemoRunner';
-import PhysicalApparatus, { initialApparatus, near, mountedPosition, reservoirTip, flaskTip, secured, aligned, funnelSeated, bottlePosition, toolsClear, SHELF, type ApparatusState, type Instrument, type Point } from './PhysicalApparatus';
+import PhysicalApparatus, { initialApparatus, near, mountedPosition, reservoirTip, flaskTip, secured, aligned, funnelSeated, bottlePosition, toolsClear, SHELF, type ApparatusState, type Instrument, type Point, type BuretteZoomState } from './PhysicalApparatus';
 
 const NAOH_CONC = 0.1, HCL_VOL = 25, ENDPOINT = 25;
 const buttonClass = 'rounded-xl border border-slate-600 px-3 py-2 text-sm text-slate-100 hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-white disabled:opacity-40 disabled:cursor-not-allowed';
@@ -38,6 +38,9 @@ export default function TitrationLab() {
   const [feedback, setFeedback] = useState('Place the burette in the clamp, then tighten the clamp wheel.');
   const [filling, setFilling] = useState(false);
   const [bulbActive, setBulbActive] = useState(false);
+  const [buretteZoom, setBuretteZoom] = useState<BuretteZoomState>({ isZoomed: false, zoomLevel: 1, panOffset: { x: 0, y: 0 } });
+  const [showVolumeReading, setShowVolumeReading] = useState(false);
+  const [studentVolume, setStudentVolume] = useState<string>('');
   const fillingRef = useRef(false);
   const bulbUntil = useRef(0);
   const singleDropRef = useRef(false);
@@ -205,15 +208,17 @@ export default function TitrationLab() {
     const v = volumeRef.current;
     if (lockedRef.current || !ready(apparatusRef.current) || apparatusRef.current.opening > 0 || calculatePH(v) < 8.2 || v > ENDPOINT + 0.5) return;
     stop(); lockedRef.current = true; setIsDone(true);
-    const accuracy = Math.max(0, 1 - Math.abs(v - ENDPOINT) / 5);
-    if (!isDemo) completeExperiment('titration-acid-base', Math.round(accuracy * 60 + 40), accuracy);
-    setFeedback(locale === 'ne' ? (isDemo ? 'डेमो मात्र। प्रगति सुरक्षित भएन।' : 'अन्त बिन्दु सुरक्षित भयो। प्रतिवेदन तयार छ।') : (isDemo ? 'Demo only. No completion earned.' : 'Endpoint recorded. Your report is ready.'));
+    setShowVolumeReading(true);
+    setFeedback(locale === 'ne' ? (isDemo ? 'डेमो मात्र। प्रगति सुरक्षित भएन।' : 'अन्त बिन्दु सुरक्षित भयो। ब्यूरेट पढ्नुहोस् र मान प्रविष्ट गर्नुहोस्।') : (isDemo ? 'Demo only. No completion earned.' : 'Endpoint recorded. Read the burette and enter your measurement.'));
   };
   const reset = (demo = false) => {
     fillingRef.current = false; bulbUntil.current = 0; singleDropRef.current = false; lockedRef.current = false;
     setFilling(false); setBulbActive(false); update(initialApparatus(demo));
     volumeRef.current = demo ? 25 : 0; setVolumeML(volumeRef.current);
     setIsDone(false); setIsOvershot(false); setIsDemo(demo); setShowReport(false);
+    setShowVolumeReading(false);
+    setStudentVolume('');
+    setBuretteZoom({ isZoomed: false, zoomLevel: 1, panOffset: { x: 0, y: 0 } });
     setPHCurve(demo ? Array.from({ length: 51 }, (_, i) => ({ volume: i * .5, pH: calculatePH(i * .5) })) : []);
     setFeedback(demo ? 'Demo: colourless at pH 7. Add one drop. No completion is saved; reset for an earned attempt.' : 'Place the burette in the clamp, then tighten the clamp wheel.');
   };
@@ -271,7 +276,8 @@ export default function TitrationLab() {
       </header>
       <PhysicalApparatus state={apparatus} volume={volumeML} color={getFlaskColor(pH, apparatus.indicator > 0)} flowing={isFlowing} filling={filling} bulbActive={bulbActive}
         locked={isDone || isOvershot} canFill={canFill} canBulb={!!bulbMode(apparatus)} canIndicator={canIndicator} canFlow={canFlow}
-        onMove={move} onWheel={turnWheel} onFill={startFill} onBulb={bulb} onIndicator={addIndicator} />
+        onMove={move} onWheel={turnWheel} onFill={startFill} onBulb={bulb} onIndicator={addIndicator}
+        buretteZoom={buretteZoom} onBuretteZoomChange={(zoom) => setBuretteZoom(prev => ({ ...prev, ...zoom }))} showVolumeReading={showVolumeReading} />
       <div className="space-y-3 border-t border-white/10 p-4">
         <div className="flex flex-wrap items-center gap-3">
           <button className={buttonClass} disabled={!canFlow || apparatus.opening > 0} onClick={singleDrop}>{locale === 'ne' ? 'एक थोपा (+0.05 mL)' : 'Single drop (+0.05 mL)'}</button>
@@ -288,9 +294,9 @@ export default function TitrationLab() {
     <aside className="w-full shrink-0 space-y-4 border-l border-white/10 bg-slate-900 p-4 lg:w-80" aria-label="Readings and guide">
       <h2 className="text-xs font-bold uppercase tracking-widest text-slate-300">Live readings</h2>
       <dl className="grid grid-cols-2 gap-3 font-mono">
-        <div className="rounded-xl bg-slate-950 p-3"><dt className="text-xs text-slate-400">NaOH delivered</dt><dd data-testid="volume-reading" className="text-xl text-blue-300">{volumeML.toFixed(2)} mL</dd></div>
+        <div className="rounded-xl bg-slate-950 p-3"><dt className="text-xs text-slate-400">NaOH delivered</dt><dd data-testid="volume-reading" className="text-xl text-blue-300">{showVolumeReading ? volumeML.toFixed(2) : '??.??'} mL</dd></div>
         <div className="rounded-xl bg-slate-950 p-3"><dt className="text-xs text-slate-400">pH (model)</dt><dd data-testid="ph-reading" className="text-xl text-pink-300">{apparatus.acid === 25 ? pH.toFixed(2) : '--'}</dd></div>
-        <div><dt className="text-xs text-slate-400">Burette remaining</dt><dd data-testid="burette-remaining">{(apparatus.fill - volumeML).toFixed(2)} mL</dd></div>
+        <div><dt className="text-xs text-slate-400">Burette remaining</dt><dd data-testid="burette-remaining">{showVolumeReading ? (apparatus.fill - volumeML).toFixed(2) : '??.??'} mL</dd></div>
         <div><dt className="text-xs text-slate-400">Room temperature</dt><dd>25 C</dd></div>
       </dl>
       <section className="space-y-2 rounded-xl border border-accent/40 bg-accent-soft p-3">
@@ -321,13 +327,60 @@ export default function TitrationLab() {
         <p className="text-slate-400">Ideal strong acid/base at 25 C; instantaneous mixing, negligible indicator volume, pre-rinsed glassware and air-free tip. These preparation steps are assumed, not simulated.</p>
       </section>
       {isOvershot && <p className="rounded-xl bg-rose-950 p-3 text-sm text-rose-200">Endpoint overshot. Reset and use single drops near 25 mL.</p>}
-      {isDone && <section data-testid="titration-result" className="space-y-2 rounded-xl border border-emerald-700 bg-emerald-950/50 p-3 text-xs">
-        <h2 className="font-bold text-emerald-200">{isDemo ? 'Demo result (not saved)' : 'Result and conclusion'}</h2>
-        <p className="font-mono">M₁V₁ = M₂V₂<br />0.1 × {volumeML.toFixed(2)} = [HCl] × 25</p>
-        <p className="font-bold text-emerald-300">[HCl] = {calculatedConc.toFixed(4)} mol/L</p>
-        <p>HCl and NaOH neutralize in a 1:1 mole ratio. The indicator endpoint gives {((calculatedConc / .1 - 1) * 100).toFixed(2)}% error relative to the simulated 0.1000 mol/L sample.</p>
-      </section>}
+      {isDone && showVolumeReading && !isDemo && (
+        <section className="space-y-3 rounded-xl border border-blue-700 bg-blue-950/50 p-3 text-xs">
+          <h2 className="font-bold text-blue-200">Enter Your Burette Reading</h2>
+          <p className="text-slate-300">Zoom into the burette above, read the meniscus bottom against the scale, then enter the volume below.</p>
+          <div className="space-y-2">
+            <label className="block">
+              <span className="text-xs text-slate-400">Initial reading (mL):</span>
+              <input type="number" step="0.01" min="0" max="50" value={0} readOnly className="w-full mt-1 rounded bg-slate-900 border border-slate-600 px-2 py-1 text-sm text-slate-100" />
+            </label>
+            <label className="block">
+              <span className="text-xs text-slate-400">Final reading (mL):</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                max="50"
+                value={studentVolume}
+                onChange={e => setStudentVolume(e.target.value)}
+                className="w-full mt-1 rounded bg-slate-900 border border-slate-600 px-2 py-1 text-sm text-slate-100 focus:border-blue-400 focus:outline-none"
+                placeholder="e.g., 25.05"
+                autoFocus
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-slate-400">Volume delivered (mL):</span>
+              <input type="number" step="0.01" value={studentVolume ? parseFloat(studentVolume).toFixed(2) : ''} readOnly className="w-full mt-1 rounded bg-slate-900 border border-slate-600 px-2 py-1 text-sm text-blue-300 font-mono" />
+            </label>
+            <button
+              className={`${buttonClass} bg-blue-800 w-full`}
+              onClick={() => {
+                if (studentVolume && parseFloat(studentVolume) > 0) {
+                  setShowReport(true);
+                }
+              }}
+              disabled={!studentVolume || parseFloat(studentVolume) <= 0}
+            >
+              Submit Reading & Generate Report
+            </button>
+          </div>
+        </section>
+      )}
+      {isDone && (() => {
+        const finalVolume = studentVolume && !isDemo ? parseFloat(studentVolume) : volumeML;
+        const finalConc = finalVolume * NAOH_CONC / HCL_VOL;
+        return (
+          <section data-testid="titration-result" className="space-y-2 rounded-xl border border-emerald-700 bg-emerald-950/50 p-3 text-xs">
+            <h2 className="font-bold text-emerald-200">{isDemo ? 'Demo result (not saved)' : 'Result and conclusion'}</h2>
+            <p className="font-mono">M₁V₁ = M₂V₂<br />0.1 × {finalVolume.toFixed(2)} = [HCl] × 25</p>
+            <p className="font-bold text-emerald-300">[HCl] = {finalConc.toFixed(4)} mol/L</p>
+            <p>HCl and NaOH neutralize in a 1:1 mole ratio. The indicator endpoint gives {((finalConc / .1 - 1) * 100).toFixed(2)}% error relative to the simulated 0.1000 mol/L sample.</p>
+          </section>
+        );
+      })()}
     </aside>
-    {showReport && !isDemo && isDone && <LabReport experimentId="titration-acid-base" data={{ volumeDispensed: volumeML, calculatedConcentration: calculatedConc, endpointPH: pH, pHData: pHCurve }} onClose={() => setShowReport(false)} />}
+    {showReport && !isDemo && isDone && <LabReport experimentId="titration-acid-base" data={{ volumeDispensed: studentVolume ? parseFloat(studentVolume) : volumeML, calculatedConcentration: (studentVolume ? parseFloat(studentVolume) : volumeML) * NAOH_CONC / HCL_VOL, endpointPH: pH, pHData: pHCurve }} onClose={() => setShowReport(false)} />}
   </div>;
 }
