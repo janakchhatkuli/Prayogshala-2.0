@@ -77,7 +77,7 @@ function init() {
 function loadModel() {
     const loader = new GLTFLoader();
     const dracoLoader = new DRACOLoader();
-    dracoLoader.setDecoderPath('./libs/draco/');
+    dracoLoader.setDecoderPath('/draco/');
     loader.setDRACOLoader(dracoLoader);
 
     loader.load(

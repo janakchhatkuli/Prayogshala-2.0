@@ -236,6 +236,11 @@ export function createBodyScene(
         (gltf) => {
           if (disposed) return;
           const model = gltf.scene;
+          if (!model) {
+            onFailure('Loaded model has no scene');
+            setStatus('error');
+            return;
+          }
           model.name = 'AnatomicalModel';
           
           model.traverse(child => {
@@ -285,6 +290,10 @@ export function createBodyScene(
             'intestine': 'body',
           };
 
+          if (!model) {
+            console.error('Model is undefined before second traverse');
+            return;
+          }
           model.traverse(child => {
             if (child instanceof THREE.Mesh) {
               const name = child.name.toLowerCase();
@@ -302,7 +311,7 @@ export function createBodyScene(
             }
           });
 
-          SYSTEMS.forEach(sys => {
+        SYSTEMS.forEach(sys => {
             scene.add(systemGroups[sys]);
           });
 
