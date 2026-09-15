@@ -2,533 +2,777 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { SYSTEMS, type System, type Point } from './anatomy';
 
-export type CameraCommand = 'left' | 'right' | 'up' | 'down' | 'in' | 'out' | 'pan-left' | 'pan-right' | 'pan-up' | 'pan-down' | 'reset';
+export type AnatomyLayer = 'surface' | 'muscles' | 'skeleton' | 'organs' | 'nervous' | 'respiratory' | 'digestive' | 'circulatory' | 'urinary' | 'all';
+export type CameraCommand = 'front' | 'back' | 'left' | 'right' | 'reset' | 'in' | 'out';
+export type AnimationState = 'playing' | 'paused' | 'stopped';
+export interface StructureInfo { id: string; name: string; layer: Exclude<AnatomyLayer, 'all'>; system: string; description: string; function?: string; location?: string; source: 'Z-Anatomy' | 'HRA'; }
+export interface BodyScene { setLayer(layer: AnatomyLayer): Promise<void>; select(id: string | null): void; focus(id?: string | null): void; isolate(id: string | null): void; command(command: CameraCommand): void; setOpacity(layer: Exclude<AnatomyLayer, 'all'>, opacity: number): void; setXray(enabled: boolean): void; setLabels(enabled: boolean): void; setExploded(enabled: boolean): void; setAnimation(state: AnimationState): void; resetAnimation(): void; dispose(): void; getStructures(layer?: AnatomyLayer): StructureInfo[]; }
+export interface BodySceneCallbacks { onSelect(info: StructureInfo | null): void; onProgress(message: string, percent: number): void; onReady(structures: StructureInfo[]): void; onFailure(message: string): void; }
 
-export interface StructureInfo {
-  id: string;
-  name: string;
+type MajorLayer = Exclude<AnatomyLayer, 'all'>;
+type MeshMaterial = THREE.Material | THREE.Material[];
+
+interface MaterialState {
+  material: THREE.Material;
+  opacity: number;
+  transparent: boolean;
+  depthWrite: boolean;
+  emissive?: THREE.Color;
+  emissiveIntensity?: number;
 }
 
-export interface BodyScene {
-  setSystem: (system: System) => void;
-  select: (id: string | null) => void;
-  command: (command: CameraCommand) => void;
-  dispose: () => void;
-  getStructures: (system: System) => StructureInfo[];
+interface StructureRecord {
+  info: StructureInfo;
+  mesh: THREE.Mesh;
+  materials: MaterialState[];
+  basePosition: THREE.Vector3;
+  baseScale: THREE.Vector3;
+  explodedPosition: THREE.Vector3;
+  asset: AssetKey;
+  alpha: number;
+  targetAlpha: number;
 }
 
-const SYSTEM_COLORS: Record<System, string> = {
-  body: '#c9a487',
-  skeleton: '#eee1bd',
-  muscles: '#e18179',
-  nervous: '#f5d45e',
+interface CameraMove {
+  start: number;
+  duration: number;
+  fromPosition: THREE.Vector3;
+  toPosition: THREE.Vector3;
+  fromTarget: THREE.Vector3;
+  toTarget: THREE.Vector3;
+}
+
+interface AssetDefinition {
+  file: string;
+  layer: MajorLayer;
+  system: string;
+}
+
+const HRA_ROOT_SCALE = 0.9288893838;
+const HRA_ROOT_POSITION = new THREE.Vector3(0.0003184934, 0.8576904758, 0.00574435);
+const FADE_DURATION = 450;
+
+const ASSETS = {
+  skin: { file: 'VH_M_Skin.glb', layer: 'surface', system: 'Integumentary system' },
+  lung: { file: 'VH_M_Lung.glb', layer: 'respiratory', system: 'Respiratory system' },
+  liver: { file: 'VH_M_Liver.glb', layer: 'digestive', system: 'Digestive system' },
+  pancreas: { file: 'VH_M_Pancreas.glb', layer: 'digestive', system: 'Digestive system' },
+  gallbladder: { file: 'VH_M_Gallbladder.glb', layer: 'digestive', system: 'Digestive system' },
+  biliaryTree: { file: 'VH_M_Biliary_Tree.glb', layer: 'digestive', system: 'Digestive system' },
+  smallIntestine: { file: 'VH_M_Small_Intestine.glb', layer: 'digestive', system: 'Digestive system' },
+  largeIntestine: { file: 'SBU_M_Intestine_Large.glb', layer: 'digestive', system: 'Digestive system' },
+  heart: { file: 'VH_M_Heart.glb', layer: 'circulatory', system: 'Circulatory system' },
+  vasculature: { file: 'VH_M_Blood_Vasculature.glb', layer: 'circulatory', system: 'Circulatory system' },
+  kidneyLeft: { file: 'VH_M_Kidney_L.glb', layer: 'urinary', system: 'Urinary system' },
+  kidneyRight: { file: 'VH_M_Kidney_R.glb', layer: 'urinary', system: 'Urinary system' },
+  ureterLeft: { file: 'VH_M_Ureter_L.glb', layer: 'urinary', system: 'Urinary system' },
+  ureterRight: { file: 'VH_M_Ureter_R.glb', layer: 'urinary', system: 'Urinary system' },
+  bladder: { file: 'VH_M_Urinary_Bladder.glb', layer: 'urinary', system: 'Urinary system' },
+  urethra: { file: 'VH_M_Urethra.glb', layer: 'urinary', system: 'Urinary system' },
+  brain: { file: 'Allen_M_Brain.glb', layer: 'nervous', system: 'Nervous system' },
+  spinalCord: { file: 'VH_M_Spinal_Cord.glb', layer: 'nervous', system: 'Nervous system' },
+} as const satisfies Record<string, AssetDefinition>;
+
+type AssetKey = keyof typeof ASSETS | 'z-anatomy';
+
+const INTERNAL_ASSETS = Object.keys(ASSETS).filter((key): key is keyof typeof ASSETS => key !== 'skin');
+const LAYER_ASSETS: Record<MajorLayer, (keyof typeof ASSETS)[]> = {
+  surface: ['skin'],
+  muscles: [],
+  skeleton: [],
+  organs: INTERNAL_ASSETS,
+  nervous: ['brain', 'spinalCord'],
+  respiratory: ['lung'],
+  digestive: ['liver', 'pancreas', 'gallbladder', 'biliaryTree', 'smallIntestine', 'largeIntestine'],
+  circulatory: ['heart', 'vasculature'],
+  urinary: ['kidneyLeft', 'kidneyRight', 'ureterLeft', 'ureterRight', 'bladder', 'urethra'],
 };
 
-const SYSTEM_MATERIALS: Record<System, THREE.MeshStandardMaterialParameters> = {
-  body: { color: '#c9a487', roughness: 0.7, metalness: 0.05 },
-  skeleton: { color: '#f0e6d2', roughness: 0.85, metalness: 0.0 },
-  muscles: { color: '#b84545', roughness: 0.6, metalness: 0.05 },
-  nervous: { color: '#e8b84d', roughness: 0.55, metalness: 0.1, emissive: '#8b6b1a', emissiveIntensity: 0.15 },
+const LAYER_SYSTEM: Record<MajorLayer, string> = {
+  surface: 'Integumentary system', muscles: 'Muscular system', skeleton: 'Skeletal system', organs: 'Internal organs',
+  nervous: 'Nervous system', respiratory: 'Respiratory system', digestive: 'Digestive system',
+  circulatory: 'Circulatory system', urinary: 'Urinary system',
 };
 
-function createSystemMaterial(system: System): THREE.MeshStandardMaterial {
-  const params = SYSTEM_MATERIALS[system];
-  const material = new THREE.MeshStandardMaterial(params);
-  material.name = `${system}-material`;
-  return material;
+function asText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
-export function createBodyScene(
-  host: HTMLDivElement,
-  label: HTMLDivElement,
-  onSelect: (system: System, id: string) => void,
-  onFailure: (message: string) => void,
-): BodyScene {
+function cleanName(value: string): string {
+  const cleaned = value.replace(/^(mesh|node)[_-]?\d*[_-]?/i, '').replace(/[_.-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return cleaned || 'Anatomical structure';
+}
+
+function slug(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'structure';
+}
+
+function materialArray(material: MeshMaterial): THREE.Material[] {
+  return Array.isArray(material) ? material : [material];
+}
+
+function isVisibleInHierarchy(object: THREE.Object3D): boolean {
+  for (let current: THREE.Object3D | null = object; current; current = current.parent) if (!current.visible) return false;
+  return true;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error && error.message ? error.message : 'unknown loading error';
+}
+
+export function createBodyScene(host: HTMLDivElement, label: HTMLDivElement, callbacks: BodySceneCallbacks): BodyScene {
+  let disposed = false;
+  let frame = 0;
+  let inView = true;
+  let controlsSettling = 0;
+  let cameraMove: CameraMove | null = null;
+  let fadeStarted = 0;
+  let activeLayer: AnatomyLayer = 'surface';
+  let selectedId: string | null = null;
+  let isolatedId: string | null = null;
+  let labelsEnabled = true;
+  let xray = false;
+  let exploded = false;
+  let animationState: AnimationState = 'stopped';
+  let animationTime = 0;
+  let previousFrameTime = 0;
+  let layerRequest = 0;
+  let pointerDown: { x: number; y: number; id: number } | null = null;
+  let pointerDragged = false;
+
+  const records: StructureRecord[] = [];
+  const byId = new Map<string, StructureRecord>();
+  const assetPromises = new Map<keyof typeof ASSETS, Promise<void>>();
+  const roots = new Set<THREE.Object3D>();
   const geometries = new Set<THREE.BufferGeometry>();
   const materials = new Set<THREE.Material>();
-  let renderer: THREE.WebGLRenderer | undefined;
-  let controls: OrbitControls | undefined;
-  let observer: ResizeObserver | undefined;
-  let visibilityObserver: IntersectionObserver | undefined;
-  let frame = 0;
-  let disposed = false;
-  let inView = true;
-  const cleanups: (() => void)[] = [];
+  const textures = new Set<THREE.Texture>();
+  const cleanups: Array<() => void> = [];
+  const layerOpacity: Record<MajorLayer, number> = {
+    surface: 1, muscles: 1, skeleton: 1, organs: 1, nervous: 1,
+    respiratory: 1, digestive: 1, circulatory: 1, urinary: 1,
+  };
 
-  const systemGroups = Object.fromEntries(
-    SYSTEMS.map(system => {
-      const group = new THREE.Group();
-      group.name = `${system} anatomical system`;
-      group.visible = false;
-      return [system, group];
-    })
-  ) as Record<System, THREE.Group>;
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+  const canvas = renderer.domElement;
+  canvas.tabIndex = 0;
+  canvas.setAttribute('role', 'application');
+  canvas.setAttribute('aria-label', 'Interactive three-dimensional human anatomy model');
+  canvas.setAttribute('aria-describedby', 'human-body-interaction');
+  canvas.style.cssText = 'display:block;width:100%;height:100%;touch-action:none;outline-offset:-4px';
+  host.appendChild(canvas);
 
-  const originalMaterials = new Map<THREE.Mesh, THREE.Material>();
-  const highlightMaterial = new THREE.MeshStandardMaterial({
-    color: '#3b91a8',
-    emissive: '#3b91a8',
-    emissiveIntensity: 0.85,
-    roughness: 0.3,
-    metalness: 0.1,
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0f1824);
+  const camera = new THREE.PerspectiveCamera(36, 1, 0.03, 50);
+  const homeTarget = new THREE.Vector3(0, 0.86, 0);
+  const homePosition = new THREE.Vector3(0, 0.92, 3.25);
+  camera.position.copy(homePosition);
+
+  const controls = new OrbitControls(camera, canvas);
+  controls.target.copy(homeTarget);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.1;
+  controls.minDistance = 0.42;
+  controls.maxDistance = 10;
+  controls.minPolarAngle = 0.08;
+  controls.maxPolarAngle = Math.PI - 0.08;
+  controls.update();
+
+  scene.add(new THREE.HemisphereLight(0xd9ebff, 0x3b302c, 2.1));
+  const key = new THREE.DirectionalLight(0xfff3e1, 3.1);
+  key.position.set(-3, 5, 4);
+  key.castShadow = true;
+  key.shadow.mapSize.set(1024, 1024);
+  key.shadow.bias = -0.0002;
+  scene.add(key);
+  const rim = new THREE.DirectionalLight(0x75aee8, 1.5);
+  rim.position.set(3, 3, -3);
+  scene.add(rim);
+
+  const draco = new DRACOLoader();
+  draco.setDecoderPath('/draco/');
+  const loader = new GLTFLoader().setDRACOLoader(draco);
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  const overlay = new THREE.Group();
+  overlay.name = 'Approximate educational directional overlays';
+  overlay.userData = { educationalOverlay: true, approximate: true, selectable: false };
+  scene.add(overlay);
+  const overlayMaterial = new THREE.PointsMaterial({ color: 0x67d8ff, size: 0.022, transparent: true, opacity: 0.88, depthWrite: false });
+  materials.add(overlayMaterial);
+  const overlayPositions = new Float32Array(42 * 3);
+  const overlayGeometry = new THREE.BufferGeometry();
+  overlayGeometry.setAttribute('position', new THREE.BufferAttribute(overlayPositions, 3));
+  geometries.add(overlayGeometry);
+  const particles = new THREE.Points(overlayGeometry, overlayMaterial);
+  particles.frustumCulled = false;
+  particles.userData = { educationalOverlay: true, approximate: true, selectable: false };
+  overlay.add(particles);
+  overlay.visible = false;
+
+  function requestRender(): void {
+    if (!disposed && !frame && inView && !document.hidden) frame = requestAnimationFrame(render);
+  }
+
+  function layerShown(record: StructureRecord): boolean {
+    if (isolatedId) return record.info.id === isolatedId;
+    if (activeLayer === 'all') return true;
+    if (activeLayer === 'organs') return record.asset !== 'z-anatomy' && record.info.layer !== 'surface';
+    return record.info.layer === activeLayer;
+  }
+
+  function effectiveOpacity(record: StructureRecord): number {
+    let opacity = layerOpacity[record.info.layer];
+    if (record.asset !== 'z-anatomy' && record.info.layer !== 'surface') opacity *= layerOpacity.organs;
+    if (xray && record.info.layer === 'surface') opacity = Math.min(opacity, 0.24);
+    return opacity * record.alpha;
+  }
+
+  function updateMaterial(record: StructureRecord): void {
+    const opacity = effectiveOpacity(record);
+    const selected = record.info.id === selectedId;
+    for (const state of record.materials) {
+      state.material.opacity = state.opacity * opacity;
+      state.material.transparent = state.transparent || opacity < 0.999;
+      state.material.depthWrite = state.depthWrite && opacity > 0.72;
+      if (state.emissive && 'emissive' in state.material) {
+        const material = state.material as THREE.MeshStandardMaterial;
+        material.emissive.copy(selected ? new THREE.Color(0x16b8d4) : state.emissive);
+        material.emissiveIntensity = selected ? 0.75 : (state.emissiveIntensity ?? 1);
+      }
+      state.material.needsUpdate = true;
+    }
+    record.mesh.visible = opacity > 0.002;
+  }
+
+  function beginFade(): void {
+    if (reducedMotion.matches) {
+      fadeStarted = 0;
+      for (const record of records) {
+        record.targetAlpha = layerShown(record) ? 1 : 0;
+        record.alpha = record.targetAlpha;
+        updateMaterial(record);
+      }
+      requestRender();
+      return;
+    }
+    fadeStarted = performance.now();
+    for (const record of records) record.targetAlpha = layerShown(record) ? 1 : 0;
+    requestRender();
+  }
+
+  function selectedRecord(): StructureRecord | undefined {
+    return selectedId ? byId.get(selectedId) : undefined;
+  }
+
+  function updateLabel(): void {
+    const record = selectedRecord();
+    if (!labelsEnabled || !record || !record.mesh.visible || !isVisibleInHierarchy(record.mesh)) {
+      label.hidden = true;
+      return;
+    }
+    const point = new THREE.Box3().setFromObject(record.mesh).getCenter(new THREE.Vector3()).project(camera);
+    const visible = point.z > -1 && point.z < 1 && Math.abs(point.x) < 0.98 && Math.abs(point.y) < 0.98;
+    label.hidden = !visible;
+    if (visible) {
+      label.textContent = record.info.name;
+      label.style.left = `${(point.x * 0.5 + 0.5) * host.clientWidth}px`;
+      label.style.top = `${(-point.y * 0.5 + 0.5) * host.clientHeight}px`;
+    }
+  }
+
+  function setOverlayPoint(index: number, x: number, y: number, z: number): void {
+    overlayPositions[index * 3] = x;
+    overlayPositions[index * 3 + 1] = y;
+    overlayPositions[index * 3 + 2] = z;
+  }
+
+  function updateEducationalAnimation(dt: number): void {
+    if (animationState !== 'playing') return;
+    animationTime += dt;
+    const phase = animationTime;
+    const supported = activeLayer === 'respiratory' || activeLayer === 'circulatory' || activeLayer === 'digestive' || activeLayer === 'nervous';
+    overlay.visible = supported;
+    if (activeLayer === 'respiratory') {
+      for (const record of records) if (record.asset === 'lung') record.mesh.scale.copy(record.baseScale).multiplyScalar(1 + Math.sin(phase * 2.2) * 0.018);
+      for (let i = 0; i < 42; i++) {
+        const p = (i / 42 + phase * 0.18) % 1;
+        setOverlayPoint(i, Math.sin(i * 2.4) * 0.035 * p, 1.64 - p * 0.72, 0.09);
+      }
+    } else if (activeLayer === 'circulatory') {
+      for (const record of records) if (record.asset === 'heart') record.mesh.scale.copy(record.baseScale).multiplyScalar(1 + Math.max(0, Math.sin(phase * 7)) * 0.045);
+      for (let i = 0; i < 42; i++) {
+        const p = (i / 42 + phase * 0.24) % 1;
+        const side = i % 2 ? -1 : 1;
+        setOverlayPoint(i, side * (0.11 + Math.sin(p * Math.PI) * 0.14), 1.13 - p * 0.85, 0.04 + Math.sin(p * 8) * 0.025);
+      }
+    } else if (activeLayer === 'digestive') {
+      for (let i = 0; i < 42; i++) {
+        const p = (i / 42 + phase * 0.11) % 1;
+        setOverlayPoint(i, Math.sin(p * 7 * Math.PI) * (0.04 + p * 0.12), 1.22 - p * 0.72, 0.13 + Math.cos(p * 6 * Math.PI) * 0.035);
+      }
+    } else if (activeLayer === 'nervous') {
+      for (let i = 0; i < 42; i++) {
+        const p = (i / 42 + phase * 0.35) % 1;
+        setOverlayPoint(i, Math.sin(i * 1.7) * 0.012, 1.67 - p * 1.2, -0.035);
+      }
+    }
+    overlayGeometry.attributes.position.needsUpdate = true;
+  }
+
+  function restoreAnimatedScales(): void {
+    for (const record of records) record.mesh.scale.copy(record.baseScale);
+  }
+
+  function render(now: number): void {
+    frame = 0;
+    if (disposed || !inView || document.hidden) return;
+    const dt = previousFrameTime ? Math.min((now - previousFrameTime) / 1000, 0.05) : 0;
+    previousFrameTime = now;
+    let continuous = false;
+
+    if (cameraMove) {
+      const t = Math.min((now - cameraMove.start) / cameraMove.duration, 1);
+      const eased = 1 - (1 - t) ** 3;
+      camera.position.lerpVectors(cameraMove.fromPosition, cameraMove.toPosition, eased);
+      controls.target.lerpVectors(cameraMove.fromTarget, cameraMove.toTarget, eased);
+      if (t === 1) cameraMove = null;
+      else continuous = true;
+    }
+
+    if (fadeStarted) {
+      const step = Math.min((now - fadeStarted) / FADE_DURATION, 1);
+      for (const record of records) {
+        record.alpha += (record.targetAlpha - record.alpha) * Math.min(1, step * 0.22 + 0.12);
+        if (Math.abs(record.alpha - record.targetAlpha) < 0.005) record.alpha = record.targetAlpha;
+        else continuous = true;
+        updateMaterial(record);
+      }
+      if (!continuous && !cameraMove) fadeStarted = 0;
+    }
+
+    if (animationState === 'playing') {
+      updateEducationalAnimation(dt);
+      if (activeLayer === 'muscles' || activeLayer === 'skeleton') {
+        const record = selectedRecord();
+        if (record) record.mesh.scale.copy(record.baseScale).multiplyScalar(1 + Math.sin(animationTime * 2.4) * 0.008);
+      }
+      continuous = true;
+    }
+
+    controls.update();
+    if (controlsSettling > 0) { controlsSettling--; continuous = true; }
+    updateLabel();
+    renderer.render(scene, camera);
+    if (continuous || cameraMove) requestRender();
+  }
+
+  function rememberTexture(value: unknown): void {
+    if (value instanceof THREE.Texture) textures.add(value);
+  }
+
+  function cloneMaterials(mesh: THREE.Mesh): MaterialState[] {
+    const cloned = materialArray(mesh.material as MeshMaterial).map(source => {
+      materials.add(source);
+      for (const value of Object.values(source)) rememberTexture(value);
+      const material = source.clone();
+      materials.add(material);
+      const emissiveMaterial = material as THREE.MeshStandardMaterial;
+      return {
+        material,
+        opacity: material.opacity,
+        transparent: material.transparent,
+        depthWrite: material.depthWrite,
+        emissive: emissiveMaterial.emissive?.clone(),
+        emissiveIntensity: emissiveMaterial.emissiveIntensity,
+      };
+    });
+    mesh.material = (Array.isArray(mesh.material) ? cloned.map(item => item.material) : cloned[0].material) as MeshMaterial;
+    return cloned;
+  }
+
+  function registerModel(root: THREE.Object3D, source: 'Z-Anatomy' | 'HRA', asset: AssetKey, fixedLayer?: MajorLayer, fixedSystem?: string): void {
+    const meshes: THREE.Mesh[] = [];
+    root.traverse(child => { if (child instanceof THREE.Mesh) meshes.push(child); });
+    const counters = new Map<string, number>();
+    for (const mesh of meshes) {
+      geometries.add(mesh.geometry);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      const lineage: THREE.Object3D[] = [];
+      for (let node: THREE.Object3D | null = mesh; node && node !== root.parent; node = node.parent) lineage.unshift(node);
+      const metadata = Object.assign({}, ...lineage.map(node => node.userData)) as Record<string, unknown>;
+      const type = asText(metadata.type).toLowerCase();
+      const searchable = `${type} ${mesh.name}`.toLowerCase();
+      let layer: MajorLayer = fixedLayer ?? 'muscles';
+      if (!fixedLayer) {
+        if (type === 'bone' || type.includes('bone')) layer = 'skeleton';
+        else if (type === 'muscle' || type.includes('muscle')) layer = 'muscles';
+        else if (/\bbone\b|skeleton/.test(searchable)) layer = 'skeleton';
+        else if (/\bmuscle\b|muscular/.test(searchable)) layer = 'muscles';
+      }
+      const rawName = asText(metadata.label) || asText(metadata.name) || asText(metadata.nameDetail) || mesh.name;
+      const name = cleanName(rawName);
+      const baseId = `${source === 'HRA' ? 'hra' : 'za'}:${asset}:${layer}:${slug(name)}`;
+      const ordinal = (counters.get(baseId) ?? 0) + 1;
+      counters.set(baseId, ordinal);
+      let id = ordinal === 1 ? baseId : `${baseId}:${ordinal}`;
+      while (byId.has(id)) id = `${baseId}:${ordinal}-${byId.size}`;
+      const description = asText(metadata.description) || `${name} is shown as part of the ${fixedSystem ?? LAYER_SYSTEM[layer]}.`;
+      const functionText = asText(metadata.function);
+      const location = asText(metadata.location);
+      const info: StructureInfo = {
+        id, name, layer, system: fixedSystem ?? LAYER_SYSTEM[layer], description, source,
+        ...(functionText ? { function: functionText } : {}),
+        ...(location ? { location } : {}),
+      };
+      const record: StructureRecord = {
+        info, mesh, materials: cloneMaterials(mesh), asset,
+        basePosition: mesh.position.clone(), baseScale: mesh.scale.clone(), explodedPosition: mesh.position.clone(),
+        alpha: layerShown({ info, asset } as StructureRecord) ? 1 : 0,
+        targetAlpha: layerShown({ info, asset } as StructureRecord) ? 1 : 0,
+      };
+      if (asset === 'skin') {
+        for (const state of record.materials) {
+          if ('color' in state.material) (state.material as THREE.MeshStandardMaterial).color.set(0xc79272);
+          if ('roughness' in state.material) (state.material as THREE.MeshStandardMaterial).roughness = 0.72;
+        }
+      }
+      mesh.userData.structureId = id;
+      mesh.userData.structureInfo = info;
+      records.push(record);
+      byId.set(id, record);
+      updateMaterial(record);
+    }
+    roots.add(root);
+    scene.add(root);
+    computeExplodedPositions();
+  }
+
+  function computeExplodedPositions(): void {
+    scene.updateMatrixWorld(true);
+    const bodyCenter = new THREE.Vector3(0, 0.86, 0);
+    const center = new THREE.Vector3();
+    const displaced = new THREE.Vector3();
+    for (const record of records) {
+      new THREE.Box3().setFromObject(record.mesh).getCenter(center);
+      const direction = center.clone().sub(bodyCenter);
+      if (direction.lengthSq() < 0.0001) direction.set(0, center.y >= bodyCenter.y ? 1 : -1, 0);
+      direction.normalize().multiplyScalar(0.055);
+      if (record.mesh.parent) {
+        displaced.copy(center).add(direction);
+        const localCenter = record.mesh.parent.worldToLocal(center.clone());
+        record.explodedPosition.copy(record.basePosition).add(record.mesh.parent.worldToLocal(displaced).sub(localCenter));
+      }
+      record.mesh.position.copy(exploded ? record.explodedPosition : record.basePosition);
+    }
+  }
+
+  function loadUrl(url: string, message: string, progressBase: number, progressSpan: number): Promise<THREE.Object3D> {
+    return new Promise((resolve, reject) => {
+      loader.load(url, gltf => {
+        if (disposed) {
+          gltf.scene.traverse(child => {
+            if (child instanceof THREE.Mesh) {
+              child.geometry.dispose();
+              materialArray(child.material as MeshMaterial).forEach(material => material.dispose());
+            }
+          });
+          reject(new Error('Viewer was disposed'));
+          return;
+        }
+        resolve(gltf.scene);
+      }, event => {
+        const fraction = event.lengthComputable && event.total ? event.loaded / event.total : 0;
+        callbacks.onProgress(message, Math.round(progressBase + fraction * progressSpan));
+      }, reject);
+    });
+  }
+
+  function loadAsset(keyName: keyof typeof ASSETS, initial = false): Promise<void> {
+    const existing = assetPromises.get(keyName);
+    if (existing) return existing;
+    const definition = ASSETS[keyName];
+    const promise = loadUrl(`/anatomy/hra-v1.2/${definition.file}`, `Loading ${definition.file.replace('.glb', '').replace(/_/g, ' ')}...`, initial ? 72 : 10, initial ? 27 : 80)
+      .then(root => {
+        root.name = `HRA ${keyName}`;
+        root.scale.setScalar(HRA_ROOT_SCALE);
+        root.position.copy(HRA_ROOT_POSITION);
+        root.updateMatrixWorld(true);
+        registerModel(root, 'HRA', keyName, definition.layer, definition.system);
+        beginFade();
+        callbacks.onReady(records.map(record => record.info));
+      })
+      .catch(error => {
+        assetPromises.delete(keyName);
+        if (!initial) {
+          const message = `Failed to load ${definition.file}: ${errorMessage(error)}. Already loaded anatomy remains available.`;
+          callbacks.onFailure(message);
+        }
+        throw error;
+      });
+    assetPromises.set(keyName, promise);
+    return promise;
+  }
+
+  async function initialize(): Promise<void> {
+    try {
+      callbacks.onProgress('Loading Z-Anatomy musculoskeletal model...', 0);
+      const body = await loadUrl('/body.glb', 'Loading Z-Anatomy musculoskeletal model...', 0, 70);
+      body.name = 'Z-Anatomy musculoskeletal model';
+      registerModel(body, 'Z-Anatomy', 'z-anatomy');
+      callbacks.onProgress('Loading HRA body surface...', 72);
+      await loadAsset('skin', true);
+      if (!disposed) {
+        callbacks.onProgress('Anatomy ready', 100);
+        callbacks.onReady(records.map(record => record.info));
+        requestRender();
+      }
+    } catch (error) {
+      if (!disposed) callbacks.onFailure(`Failed to load the initial anatomy: ${errorMessage(error)}.`);
+    }
+  }
+
+  function moveCamera(position: THREE.Vector3, target: THREE.Vector3, duration = 520): void {
+    const distance = position.distanceTo(target);
+    if (distance < controls.minDistance) position.copy(target).add(position.clone().sub(target).normalize().multiplyScalar(controls.minDistance));
+    if (reducedMotion.matches) {
+      camera.position.copy(position);
+      controls.target.copy(target);
+      cameraMove = null;
+    } else {
+      cameraMove = { start: performance.now(), duration: THREE.MathUtils.clamp(duration, 300, 800), fromPosition: camera.position.clone(), toPosition: position.clone(), fromTarget: controls.target.clone(), toTarget: target.clone() };
+    }
+    requestRender();
+  }
+
+  function focus(id: string | null = selectedId): void {
+    const record = id ? byId.get(id) : undefined;
+    if (!record) {
+      moveCamera(homePosition.clone(), homeTarget.clone());
+      return;
+    }
+    scene.updateMatrixWorld(true);
+    const sphere = new THREE.Box3().setFromObject(record.mesh).getBoundingSphere(new THREE.Sphere());
+    const radius = Math.max(sphere.radius, 0.025);
+    const fov = THREE.MathUtils.degToRad(camera.fov);
+    const fitDistance = Math.max(controls.minDistance, radius / Math.sin(fov / 2) * 1.25);
+    const direction = camera.position.clone().sub(controls.target).normalize();
+    moveCamera(sphere.center.clone().add(direction.multiplyScalar(fitDistance)), sphere.center, 480);
+  }
+
+  function select(id: string | null): void {
+    selectedId = id && byId.has(id) ? id : null;
+    for (const record of records) updateMaterial(record);
+    requestRender();
+  }
+
+  function isolate(id: string | null): void {
+    isolatedId = id && byId.has(id) ? id : null;
+    beginFade();
+  }
+
+  async function setLayer(layer: AnatomyLayer): Promise<void> {
+    const request = ++layerRequest;
+    const needed: (keyof typeof ASSETS)[] = layer === 'all' || layer === 'organs' ? INTERNAL_ASSETS : layer === 'surface' ? ['skin'] : LAYER_ASSETS[layer];
+    const results = await Promise.allSettled(needed.map(keyName => loadAsset(keyName)));
+    if (request !== layerRequest || disposed) return;
+    const failures = results.filter(result => result.status === 'rejected');
+    if (failures.length) throw new Error(`${failures.length} anatomy asset${failures.length === 1 ? '' : 's'} failed to load.`);
+    activeLayer = layer;
+    isolatedId = null;
+    select(null);
+    resetAnimation();
+    beginFade();
+    callbacks.onReady(records.map(record => record.info));
+  }
+
+  function command(value: CameraCommand): void {
+    const target = controls.target.clone();
+    const distance = THREE.MathUtils.clamp(camera.position.distanceTo(target), controls.minDistance, controls.maxDistance);
+    if (value === 'reset') { moveCamera(homePosition.clone(), homeTarget.clone()); return; }
+    if (value === 'in' || value === 'out') {
+      const direction = camera.position.clone().sub(target).normalize();
+      const next = THREE.MathUtils.clamp(distance * (value === 'in' ? 0.78 : 1.28), controls.minDistance, controls.maxDistance);
+      moveCamera(target.clone().add(direction.multiplyScalar(next)), target, 320);
+      return;
+    }
+    const positions: Record<'front' | 'back' | 'left' | 'right', THREE.Vector3> = {
+      front: new THREE.Vector3(0, 0, distance), back: new THREE.Vector3(0, 0, -distance),
+      left: new THREE.Vector3(distance, 0, 0), right: new THREE.Vector3(-distance, 0, 0),
+    };
+    moveCamera(target.clone().add(positions[value]), target, 520);
+  }
+
+  function setOpacity(layer: MajorLayer, opacity: number): void {
+    layerOpacity[layer] = THREE.MathUtils.clamp(opacity, 0, 1);
+    for (const record of records) updateMaterial(record);
+    requestRender();
+  }
+
+  function setXray(enabled: boolean): void {
+    xray = enabled;
+    for (const record of records) updateMaterial(record);
+    requestRender();
+  }
+
+  function setLabels(enabled: boolean): void {
+    labelsEnabled = enabled;
+    if (!enabled) label.hidden = true;
+    requestRender();
+  }
+
+  function setExploded(enabled: boolean): void {
+    exploded = enabled;
+    for (const record of records) record.mesh.position.copy(enabled ? record.explodedPosition : record.basePosition);
+    requestRender();
+  }
+
+  function setAnimation(state: AnimationState): void {
+    const supported = activeLayer === 'respiratory' || activeLayer === 'circulatory' || activeLayer === 'digestive' || activeLayer === 'nervous' || activeLayer === 'muscles' || activeLayer === 'skeleton';
+    if (!supported) return;
+    animationState = state;
+    if (state === 'stopped') resetAnimation();
+    requestRender();
+  }
+
+  function resetAnimation(): void {
+    animationState = 'stopped';
+    animationTime = 0;
+    overlay.visible = false;
+    restoreAnimatedScales();
+    requestRender();
+  }
+
+  function getStructures(layer?: AnatomyLayer): StructureInfo[] {
+    return records.filter(record => !layer || layer === 'all' || (layer === 'organs' ? record.asset !== 'z-anatomy' && record.info.layer !== 'surface' : record.info.layer === layer)).map(record => record.info);
+  }
+
+  function pick(event: PointerEvent): StructureRecord | undefined {
+    const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return undefined;
+    pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1);
+    raycaster.setFromCamera(pointer, camera);
+    const candidates = records.filter(record => record.mesh.visible && record.alpha > 0.05 && isVisibleInHierarchy(record.mesh)).map(record => record.mesh);
+    const hit = raycaster.intersectObjects(candidates, false)[0]?.object;
+    const id = hit?.userData.structureId;
+    return typeof id === 'string' ? byId.get(id) : undefined;
+  }
+
+  const onPointerDown = (event: PointerEvent) => {
+    if (event.button !== 0 || pointerDown) return;
+    pointerDown = { x: event.clientX, y: event.clientY, id: event.pointerId };
+    pointerDragged = false;
+  };
+  const onPointerMove = (event: PointerEvent) => {
+    if (pointerDown && Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) > 6) pointerDragged = true;
+  };
+  const onPointerUp = (event: PointerEvent) => {
+    if (!pointerDown || pointerDown.id !== event.pointerId) return;
+    const clicked = !pointerDragged && Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) <= 6;
+    pointerDown = null;
+    if (!clicked) return;
+    const record = pick(event);
+    select(record?.info.id ?? null);
+    callbacks.onSelect(record?.info ?? null);
+  };
+  const onDoubleClick = (event: MouseEvent) => {
+    const record = pick(event as PointerEvent);
+    if (record) { select(record.info.id); callbacks.onSelect(record.info); focus(record.info.id); }
+  };
+  const onPointerCancel = () => { pointerDown = null; pointerDragged = false; };
+  const onKeyDown = (event: KeyboardEvent) => {
+    const map: Record<string, CameraCommand> = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'front', ArrowDown: 'back', '+': 'in', '=': 'in', '-': 'out', Home: 'reset' };
+    const value = map[event.key];
+    if (value) { event.preventDefault(); command(value); }
+  };
+  const onContextLost = (event: Event) => { event.preventDefault(); callbacks.onFailure('The WebGL graphics context was lost. Reload the viewer to continue.'); };
+  const onVisibilityChange = () => {
+    if (document.hidden) { cancelAnimationFrame(frame); frame = 0; }
+    else requestRender();
+  };
+  const onControlStart = () => { cameraMove = null; controlsSettling = 12; requestRender(); };
+  const onControlEnd = () => { controlsSettling = 12; requestRender(); };
+  const onControlChange = () => requestRender();
+
+  controls.addEventListener('start', onControlStart);
+  controls.addEventListener('end', onControlEnd);
+  controls.addEventListener('change', onControlChange);
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('pointercancel', onPointerCancel);
+  canvas.addEventListener('dblclick', onDoubleClick);
+  canvas.addEventListener('keydown', onKeyDown);
+  canvas.addEventListener('webglcontextlost', onContextLost);
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  cleanups.push(() => {
+    controls.removeEventListener('start', onControlStart);
+    controls.removeEventListener('end', onControlEnd);
+    controls.removeEventListener('change', onControlChange);
+    canvas.removeEventListener('pointerdown', onPointerDown);
+    canvas.removeEventListener('pointermove', onPointerMove);
+    canvas.removeEventListener('pointerup', onPointerUp);
+    canvas.removeEventListener('pointercancel', onPointerCancel);
+    canvas.removeEventListener('dblclick', onDoubleClick);
+    canvas.removeEventListener('keydown', onKeyDown);
+    canvas.removeEventListener('webglcontextlost', onContextLost);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
   });
-  materials.add(highlightMaterial);
 
-  const dispose = () => {
+  const resizeObserver = new ResizeObserver(() => {
+    const width = host.clientWidth;
+    const height = host.clientHeight;
+    if (!width || !height) return;
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+    renderer.setSize(width, height, false);
+    requestRender();
+  });
+  resizeObserver.observe(host);
+  cleanups.push(() => resizeObserver.disconnect());
+
+  const intersectionObserver = new IntersectionObserver(([entry]) => {
+    inView = entry?.isIntersecting ?? true;
+    if (inView) requestRender();
+    else { cancelAnimationFrame(frame); frame = 0; }
+  });
+  intersectionObserver.observe(host);
+  cleanups.push(() => intersectionObserver.disconnect());
+
+  function dispose(): void {
     if (disposed) return;
     disposed = true;
     cancelAnimationFrame(frame);
-    observer?.disconnect();
-    visibilityObserver?.disconnect();
     cleanups.forEach(cleanup => cleanup());
-    controls?.dispose();
+    controls.dispose();
+    draco.dispose();
+    roots.forEach(root => scene.remove(root));
     geometries.forEach(geometry => geometry.dispose());
     materials.forEach(material => material.dispose());
-    renderer?.dispose();
-    renderer?.forceContextLoss();
-    renderer?.domElement.remove();
+    textures.forEach(texture => texture.dispose());
+    key.shadow.dispose();
+    renderer.dispose();
+    renderer.forceContextLoss();
+    canvas.remove();
     label.hidden = true;
-    originalMaterials.clear();
-  };
-
-  try {
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
-    const view = renderer;
-    view.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
-    view.shadowMap.enabled = true;
-    view.shadowMap.type = THREE.PCFSoftShadowMap;
-    view.shadowMap.autoUpdate = false;
-    view.shadowMap.needsUpdate = true;
-    view.outputColorSpace = THREE.SRGBColorSpace;
-    view.toneMapping = THREE.ACESFilmicToneMapping;
-    view.toneMappingExposure = 1.1;
-    const canvas = view.domElement;
-    canvas.setAttribute('role', 'img');
-    canvas.setAttribute('aria-label', 'Interactive 3D human anatomy. Use camera controls and region buttons for navigation.');
-    canvas.setAttribute('aria-describedby', 'human-body-interaction');
-    canvas.tabIndex = 0;
-    canvas.style.cssText = 'display:block;width:100%;height:100%;touch-action:none;outline-offset:-4px';
-    host.appendChild(canvas);
-
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#0f1824');
-    scene.fog = new THREE.Fog('#0f1824', 18, 40);
-
-    const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 80);
-    const homeTarget = new THREE.Vector3(0, 1.0, 0);
-    const homePosition = new THREE.Vector3(0.5, 1.2, 4.8);
-    camera.position.copy(homePosition);
-
-    controls = new OrbitControls(camera, canvas);
-    const orbit = controls;
-    orbit.target.copy(homeTarget);
-    orbit.enableDamping = true;
-    orbit.dampingFactor = 0.12;
-    orbit.minDistance = 1.2;
-    orbit.maxDistance = 12;
-    orbit.minPolarAngle = 0.1;
-    orbit.maxPolarAngle = Math.PI - 0.1;
-    orbit.maxTargetRadius = 1.5;
-    orbit.cursor.copy(homeTarget);
-    orbit.zoomSpeed = 0.85;
-    orbit.panSpeed = 0.65;
-    orbit.update();
-
-    scene.add(new THREE.HemisphereLight('#d0e8ff', '#4a4a4a', 1.8));
-    const keyLight = new THREE.DirectionalLight('#fff5e6', 2.8);
-    keyLight.position.set(-3, 6, 4);
-    keyLight.castShadow = true;
-    keyLight.shadow.mapSize.set(1024, 1024);
-    Object.assign(keyLight.shadow.camera, { left: -3.5, right: 3.5, top: 5, bottom: -2.5, near: 0.5, far: 20 });
-    keyLight.shadow.bias = -0.0003;
-    keyLight.shadow.normalBias = 0.02;
-    keyLight.target.position.set(0, 1.0, 0);
-    scene.add(keyLight, keyLight.target);
-    cleanups.push(() => keyLight.shadow.dispose());
-
-    const rimLight = new THREE.DirectionalLight('#7eb8e0', 1.6);
-    rimLight.position.set(3, 4, -3);
-    scene.add(rimLight);
-
-    const fillLight = new THREE.DirectionalLight('#ffffff', 0.6);
-    fillLight.position.set(0, -4, 0);
-    scene.add(fillLight);
-
-    const dracoLoader = new DRACOLoader();
-    dracoLoader.setDecoderPath('/draco/');
-
-    const loader = new GLTFLoader();
-    loader.setDRACOLoader(dracoLoader);
-
-    let modelLoaded = false;
-    let currentSystem: System = 'body';
-    let selected: string | null = null;
-    let resetAnim: { start: number; position: THREE.Vector3; target: THREE.Vector3 } | null = null;
-    let rendering = false;
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const point = new THREE.Vector3();
-    const offset = new THREE.Vector3();
-    const spherical = new THREE.Spherical();
-
-    function requestRender() {
-      if (!disposed && !frame && !rendering && inView && !document.hidden) {
-        frame = requestAnimationFrame(render);
-      }
-    }
-
-    function render(now: number) {
-      frame = 0;
-      if (disposed || !inView || document.hidden) return;
-      rendering = true;
-
-      if (resetAnim) {
-        const progress = Math.min((now - resetAnim.start) / 480, 1);
-        const ease = 1 - (1 - progress) ** 3;
-        camera.position.lerpVectors(resetAnim.position, homePosition, ease);
-        orbit.target.lerpVectors(resetAnim.target, homeTarget, ease);
-        if (progress === 1) resetAnim = null;
-      }
-
-      const changed = orbit.update();
-      view.render(scene, camera);
-
-      if (selected && systemGroups[currentSystem]) {
-        const targetMesh = systemGroups[currentSystem].getObjectByName(selected);
-        if (targetMesh) {
-          targetMesh.getWorldPosition(point).project(camera);
-          const visible = point.z > -1 && point.z < 1 && Math.abs(point.x) < 0.95 && Math.abs(point.y) < 0.94;
-          label.hidden = !visible;
-          if (visible) {
-            label.textContent = selected;
-            label.style.left = `${(point.x * 0.5 + 0.5) * host.clientWidth}px`;
-            label.style.top = `${(-point.y * 0.5 + 0.5) * host.clientHeight}px`;
-          }
-        } else {
-          label.hidden = true;
-        }
-      } else {
-        label.hidden = true;
-      }
-
-      rendering = false;
-      if (changed || resetAnim) requestRender();
-    }
-
-    function applySystemMaterials(group: THREE.Group, system: System) {
-      const sysMaterial = createSystemMaterial(system);
-      materials.add(sysMaterial);
-      group.traverse(child => {
-        if (child instanceof THREE.Mesh) {
-          originalMaterials.set(child, child.material);
-          child.material = sysMaterial;
-          child.castShadow = true;
-          child.receiveShadow = true;
-        }
-      });
-    }
-
-    function loadModel() {
-      const modelUrl = '/body.glb';
-      loader.load(
-        modelUrl,
-        (gltf) => {
-          if (disposed) return;
-          const model = gltf.scene;
-          if (!model) {
-            onFailure('Loaded model has no scene');
-            setStatus('error');
-            return;
-          }
-          model.name = 'AnatomicalModel';
-          
-          model.traverse(child => {
-            if (child instanceof THREE.Mesh) {
-              geometries.add(child.geometry);
-              if (child.material) {
-                if (Array.isArray(child.material)) {
-                  child.material.forEach(m => materials.add(m));
-                } else {
-                  materials.add(child.material);
-                }
-              }
-              child.castShadow = true;
-              child.receiveShadow = true;
-              child.frustumCulled = true;
-            }
-          });
-
-          const bbox = new THREE.Box3().setFromObject(model);
-          const size = bbox.getSize(new THREE.Vector3());
-          const center = bbox.getCenter(new THREE.Vector3());
-          
-          const maxDim = Math.max(size.x, size.y, size.z);
-          const scale = 2.0 / maxDim;
-          model.scale.setScalar(scale);
-          
-          model.position.sub(center.clone().multiplyScalar(scale));
-          model.position.y += 1.0;
-
-          const systemMap: Record<string, System> = {
-            'skin': 'body',
-            'body': 'body',
-            'skeleton': 'skeleton',
-            'bone': 'skeleton',
-            'muscle': 'muscles',
-            'muscles': 'muscles',
-            'nervous': 'nervous',
-            'nerve': 'nervous',
-            'brain': 'nervous',
-            'spinal': 'nervous',
-            'organ': 'body',
-            'heart': 'body',
-            'lung': 'body',
-            'liver': 'body',
-            'stomach': 'body',
-            'kidney': 'body',
-            'intestine': 'body',
-          };
-
-          if (!model) {
-            console.error('Model is undefined before second traverse');
-            return;
-          }
-          model.traverse(child => {
-            if (child instanceof THREE.Mesh) {
-              const name = child.name.toLowerCase();
-              let assignedSystem: System = 'body';
-              for (const [keyword, sys] of Object.entries(systemMap)) {
-                if (name.includes(keyword)) {
-                  assignedSystem = sys;
-                  break;
-                }
-              }
-              if (!systemGroups[assignedSystem]) assignedSystem = 'body';
-              systemGroups[assignedSystem].add(child);
-              child.userData.originalSystem = assignedSystem;
-              child.userData.anatomicalName = child.name;
-            }
-          });
-
-        SYSTEMS.forEach(sys => {
-            scene.add(systemGroups[sys]);
-          });
-
-          applySystemMaterials(systemGroups.body, 'body');
-          applySystemMaterials(systemGroups.skeleton, 'skeleton');
-          applySystemMaterials(systemGroups.muscles, 'muscles');
-          applySystemMaterials(systemGroups.nervous, 'nervous');
-
-          systemGroups.body.visible = true;
-          modelLoaded = true;
-          setStatus('ready');
-          requestRender();
-        },
-        (progress) => {
-          if (progress.lengthComputable) {
-            const percent = Math.round((progress.loaded / progress.total) * 100);
-            setStatus(`loading ${percent}%`);
-          }
-        },
-        (error) => {
-          if (disposed) return;
-          console.error('Failed to load anatomical model:', error);
-          onFailure('Failed to load the anatomical model. Ensure a valid GLB file is available at /body.glb');
-          setStatus('error');
-        }
-      );
-    }
-
-    let status: string = 'loading';
-    function setStatus(newStatus: string) {
-      status = newStatus;
-      if (newStatus === 'ready') {
-        modelLoaded = true;
-      }
-    }
-
-    const select = (id: string | null) => {
-      selected = id;
-      if (!modelLoaded) return;
-      SYSTEMS.forEach(sys => {
-        const group = systemGroups[sys];
-        group.traverse(child => {
-          if (child instanceof THREE.Mesh && child.name === id) {
-            child.material = highlightMaterial;
-          } else if (child instanceof THREE.Mesh && originalMaterials.has(child)) {
-            child.material = originalMaterials.get(child)!;
-          }
-        });
-      });
-      requestRender();
-    };
-
-    const setSystem = (value: System) => {
-      currentSystem = value;
-      SYSTEMS.forEach(sys => {
-        systemGroups[sys].visible = sys === value;
-      });
-      canvas.setAttribute('aria-label', `Interactive 3D human ${value} model. Select structures using the adjacent buttons.`);
-      select(null);
-      requestRender();
-    };
-
-    const command = (value: CameraCommand) => {
-      resetAnim = null;
-      orbit.enableDamping = false;
-      orbit.update();
-      orbit.enableDamping = true;
-
-      if (value === 'reset') {
-        if (reducedMotion.matches) {
-          camera.position.copy(homePosition);
-          orbit.target.copy(homeTarget);
-        } else {
-          resetAnim = { start: performance.now(), position: camera.position.clone(), target: orbit.target.clone() };
-        }
-      } else if (value.startsWith('pan-')) {
-        const direction = new THREE.Vector3();
-        direction.setFromMatrixColumn(camera.matrix, value === 'pan-up' || value === 'pan-down' ? 1 : 0);
-        direction.multiplyScalar(value === 'pan-left' || value === 'pan-down' ? -0.15 : 0.15);
-        camera.position.add(direction);
-        orbit.target.add(direction);
-      } else {
-        offset.copy(camera.position).sub(orbit.target);
-        spherical.setFromVector3(offset);
-        if (value === 'left') spherical.theta -= 0.2;
-        if (value === 'right') spherical.theta += 0.2;
-        if (value === 'up') spherical.phi -= 0.15;
-        if (value === 'down') spherical.phi += 0.15;
-        if (value === 'in') spherical.radius *= 0.86;
-        if (value === 'out') spherical.radius /= 0.86;
-        spherical.phi = THREE.MathUtils.clamp(spherical.phi, orbit.minPolarAngle, orbit.maxPolarAngle);
-        spherical.radius = THREE.MathUtils.clamp(spherical.radius, orbit.minDistance, orbit.maxDistance);
-        camera.position.copy(orbit.target).add(offset.setFromSpherical(spherical));
-      }
-      requestRender();
-    };
-
-    const raycaster = new THREE.Raycaster();
-    const pointer = new THREE.Vector2();
-    let down: { x: number; y: number; id: number } | null = null;
-    let dragged = false;
-
-    const pointerDown = (event: PointerEvent) => {
-      if (down || event.button !== 0) { dragged = true; return; }
-      down = { x: event.clientX, y: event.clientY, id: event.pointerId };
-      dragged = false;
-    };
-
-    const pointerMove = (event: PointerEvent) => {
-      if (down && Math.hypot(event.clientX - down.x, event.clientY - down.y) > 6) dragged = true;
-    };
-
-    const pointerUp = (event: PointerEvent) => {
-      if (!down || down.id !== event.pointerId) return;
-      const clicked = !dragged && Math.hypot(event.clientX - down.x, event.clientY - down.y) <= 6;
-      down = null;
-      if (!clicked || !modelLoaded) return;
-      const rect = canvas.getBoundingClientRect();
-      pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1);
-      raycaster.setFromCamera(pointer, camera);
-      const group = systemGroups[currentSystem];
-      const hit = raycaster.intersectObjects(group.children, true)[0];
-      if (hit?.object) {
-        let mesh = hit.object;
-        while (mesh.parent && mesh.parent !== group && !(mesh.parent instanceof THREE.Scene)) {
-          mesh = mesh.parent as THREE.Mesh;
-        }
-        if (mesh.userData.anatomicalName) {
-          onSelect(currentSystem, mesh.userData.anatomicalName);
-        } else if (mesh.name) {
-          onSelect(currentSystem, mesh.name);
-        }
-      }
-    };
-
-    const pointerCancel = () => { down = null; dragged = false; };
-
-    const keyDown = (event: KeyboardEvent) => {
-      const keys: Record<string, CameraCommand> = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down', '+': 'in', '=': 'in', '-': 'out', Home: 'reset' };
-      let value = keys[event.key];
-      if (event.shiftKey && event.key.startsWith('Arrow')) value = `pan-${value}` as CameraCommand;
-      if (value) { event.preventDefault(); command(value); }
-    };
-
-    const contextLost = (event: Event) => {
-      event.preventDefault();
-      onFailure('The WebGL graphics context was lost. Reload to try again. A WebGL 2 capable browser with graphics acceleration is required.');
-      dispose();
-    };
-
-    const visibilityChange = () => {
-      if (document.hidden) { cancelAnimationFrame(frame); frame = 0; }
-      else requestRender();
-    };
-
-    const controlStart = () => { resetAnim = null; requestRender(); };
-
-    orbit.addEventListener('change', requestRender);
-    orbit.addEventListener('start', controlStart);
-    canvas.addEventListener('pointerdown', pointerDown);
-    canvas.addEventListener('pointermove', pointerMove);
-    canvas.addEventListener('pointerup', pointerUp);
-    canvas.addEventListener('pointercancel', pointerCancel);
-    canvas.addEventListener('keydown', keyDown);
-    canvas.addEventListener('webglcontextlost', contextLost);
-    document.addEventListener('visibilitychange', visibilityChange);
-
-    cleanups.push(() => {
-      orbit.removeEventListener('change', requestRender);
-      orbit.removeEventListener('start', controlStart);
-      canvas.removeEventListener('pointerdown', pointerDown);
-      canvas.removeEventListener('pointermove', pointerMove);
-      canvas.removeEventListener('pointerup', pointerUp);
-      canvas.removeEventListener('pointercancel', pointerCancel);
-      canvas.removeEventListener('keydown', keyDown);
-      canvas.removeEventListener('webglcontextlost', contextLost);
-      document.removeEventListener('visibilitychange', visibilityChange);
-    });
-
-    let firstSize = true;
-    observer = new ResizeObserver(() => {
-      const width = host.clientWidth;
-      const height = host.clientHeight;
-      if (!width || !height) return;
-      camera.aspect = width / height;
-      camera.updateProjectionMatrix();
-      homePosition.z = Math.min(10, Math.max(4.8, 2.5 / camera.aspect));
-      if (firstSize) { camera.position.copy(homePosition); firstSize = false; }
-      view.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
-      view.setSize(width, height, false);
-      requestRender();
-    });
-    observer.observe(host);
-
-    visibilityObserver = new IntersectionObserver(([entry]) => {
-      inView = entry.isIntersecting;
-      if (inView) requestRender();
-      else { cancelAnimationFrame(frame); frame = 0; }
-    });
-    visibilityObserver.observe(host);
-
-    loadModel();
-
-    const getStructures = (sys: System): StructureInfo[] => {
-      const group = systemGroups[sys];
-      const structures: StructureInfo[] = [];
-      group.traverse(child => {
-        if (child instanceof THREE.Mesh && child.name) {
-          structures.push({ id: child.name, name: child.name });
-        }
-      });
-      return structures;
-    };
-
-    return { setSystem, select, command, dispose, getStructures };
-  } catch (error) {
-    dispose();
-    throw error;
+    records.length = 0;
+    byId.clear();
+    assetPromises.clear();
   }
+
+  void initialize();
+  requestRender();
+  return { setLayer, select, focus, isolate, command, setOpacity, setXray, setLabels, setExploded, setAnimation, resetAnimation, dispose, getStructures };
 }
